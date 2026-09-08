@@ -22,6 +22,7 @@ type CheapSharkDeal = {
   salePrice: string;
   normalPrice: string;
   storeID: string;
+  thumb?: string;
 };
 
 /**
@@ -44,6 +45,7 @@ export async function fetchDeals(): Promise<RawDeal[]> {
       title: d.title,
       link: `https://www.cheapshark.com/redirect?dealID=${d.dealID}`,
       description: `${STORE_NAMES[Number(d.storeID)] || "PC store"} · normally $${d.normalPrice}`,
+      imageUrl: d.thumb || null,
       pubDate: null,
       creator: null,
       discountPercent: 100,

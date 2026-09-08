@@ -1,13 +1,35 @@
 # Deal Finder
 
 A fast-scanning deal aggregator: one feed, pulling from 9 sources, built for
-scanning quickly rather than passively waiting for Discord alerts.
+scanning quickly rather than passively waiting for Discord alerts. Dark
+theme, product thumbnails on every source.
 
 ## Stack
 
 - Next.js 16 (App Router) + TypeScript + Tailwind
 - No database — sources are fetched live on each request; "dismissed" state
   lives in the browser's `localStorage` (per-device, not shared/synced)
+- Dark theme only (no light mode / system-preference toggle) — this is a
+  personal tool, not a public product, so committing to one look kept
+  things simple
+
+## Product images
+
+Every source now carries a thumbnail, extracted from whatever that API
+actually provides — verified against live data for each, not assumed:
+
+- **Slickdeals / DansDeals** (RSS 2.0): the full-HTML `content:encoded`
+  field usually opens with an `<img>` tag; regex-extracted, since the
+  plain-text `description`/`contentSnippet` fields don't carry it
+- **Reddit** (Atom): same idea, but the full HTML is in `content` directly
+  — Atom has no separate encoded-content field the way RSS 2.0 does
+- **CheapShark**: `thumb` field, straight from their API
+- **Epic Games**: the `keyImages` array's `"Thumbnail"` entry
+- **Keepa**: decoded from their `image` field (an array of ASCII character
+  codes, not literal bytes — see `lib/sources/keepa.ts`)
+
+A source with no image for a given post (rare, but happens) just omits the
+thumbnail rather than showing a broken-image icon.
 
 ## Getting started
 

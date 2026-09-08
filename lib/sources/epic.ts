@@ -12,6 +12,7 @@ type EpicElement = {
   catalogNs?: { mappings?: { pageSlug?: string }[] };
   offerMappings?: { pageSlug?: string }[];
   price?: { totalPrice?: { discountPrice?: number; originalPrice?: number } };
+  keyImages?: { type: string; url: string }[];
 };
 
 /**
@@ -34,11 +35,13 @@ export async function fetchDeals(): Promise<RawDeal[]> {
     .map((g) => {
       const slug = g.catalogNs?.mappings?.[0]?.pageSlug || g.offerMappings?.[0]?.pageSlug || g.urlSlug;
       const originalCents = g.price?.totalPrice?.originalPrice ?? 0;
+      const thumbnail = g.keyImages?.find((img) => img.type === "Thumbnail")?.url;
       return {
         id: `epic-${g.id}`,
         title: g.title,
         link: slug ? `https://store.epicgames.com/en-US/p/${slug}` : "https://store.epicgames.com/en-US/free-games",
         description: g.description || null,
+        imageUrl: thumbnail || null,
         pubDate: g.effectiveDate ? new Date(g.effectiveDate).toISOString() : null,
         creator: null,
         discountPercent: 100,

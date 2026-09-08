@@ -4,7 +4,10 @@ import type { RawDeal } from "@/lib/types";
 // rss-parser's built-in Item type omits `description` and `author` even
 // though both are populated at runtime (the latter for Atom feeds, e.g.
 // Reddit) — extending the type here rather than casting at every use site.
-type FeedItem = { description?: string; author?: string };
+// `content:encoded` is RSS 2.0's full-HTML field (Slickdeals, DansDeals);
+// Atom feeds (Reddit) have no such field and put full HTML directly in
+// `content` instead — both are read when looking for an image, see below.
+type FeedItem = { description?: string; author?: string; "content:encoded"?: string };
 
 const USER_AGENT = "DealFinder/1.0 (personal project)"; // Reddit and CheapShark both reject default/generic ones outright
 
@@ -25,6 +28,18 @@ const REDDIT_BOILERPLATE = /^\s*submitted by\s.*\[link\]\s*\[comments\]\s*$/i;
 function cleanDescription(raw: string): string {
   const text = raw.replace(/<[^>]*>/g, "").trim();
   return REDDIT_BOILERPLATE.test(text) ? "" : text;
+}
+
+// `content:encoded` (RSS 2.0) carries the full post HTML, usually with a
+// thumbnail <img> right at the top; `content` is Atom's equivalent for
+// Reddit. Checked in that order since a feed with both would have the
+// richer content:encoded version. Verified against live data for all three
+// RSS-based sources — this only misses the shot for a post with no image
+// at all, which just leaves imageUrl unset (handled fine downstream).
+function extractImage(html: string | undefined): string | null {
+  if (!html) return null;
+  const match = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
+  return match ? match[1] : null;
 }
 
 /**
@@ -50,6 +65,7 @@ export async function fetchDeals(feedUrl: string): Promise<RawDeal[]> {
     title: item.title || "(untitled deal)",
     link: item.link || "",
     description: cleanDescription(item.contentSnippet || item.description || ""),
+    imageUrl: extractImage(item["content:encoded"] || item.content),
     pubDate: item.pubDate ? new Date(item.pubDate).toISOString() : null,
     // dc:creator covers Slickdeals-style RSS 2.0 feeds; Atom feeds (Reddit)
     // expose the author as `author` instead, often prefixed "/u/".
