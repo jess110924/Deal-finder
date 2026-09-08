@@ -30,11 +30,15 @@ export async function fetchDeals(minDiscountPercent = 40): Promise<RawDeal[]> {
     throw new Error("KEEPA_API_KEY is not set.");
   }
 
+  const maxSalesRank = Number(process.env.KEEPA_MAX_SALES_RANK) || 300000;
+
   const selection = {
     page: 0,
     domainId: US_DOMAIN_ID,
     priceTypes: [AMAZON_PRICE_TYPE],
     deltaPercentRange: [minDiscountPercent, 100],
+    salesRankRange: [1, maxSalesRank], // excludes obscure items with near-zero actual sales
+    hasReviews: true, // requires at least one real customer review — proof someone actually bought it
     isRangeEnabled: true,
     isFilterEnabled: true,
     sortType: 4,
@@ -55,35 +59,53 @@ export async function fetchDeals(minDiscountPercent = 40): Promise<RawDeal[]> {
     throw new Error(`Keepa API error: ${JSON.stringify(json.error)}`);
   }
 
-  const deals: KeepaDeal[] = json?.deals?.dr ?? [];
+  const rawDeals: KeepaDeal[] = json?.deals?.dr ?? [];
 
-  return deals.map((d) => {
-    const currentCents = d.current?.[AMAZON_PRICE_TYPE];
-    const deltaPercent = d.deltaPercent?.[0]?.[AMAZON_PRICE_TYPE];
+  const deals = rawDeals
+    // Second, independent legitimacy check beyond the request-level filters
+    // above: salesRankDrops90 counts actual rank-drop events (a real sale
+    // happened) in the last 90 days — confirmed present on every deal object
+    // in live testing. Zero means no observed purchase activity, which is
+    // exactly the "technically-true but nobody's actually buying it at that
+    // reference price" pattern that produces fake-looking huge discounts.
+    .filter((d) => (d.salesRankDrops90 ?? 0) > 0)
+    .map((d) => {
+      const currentCents = d.current?.[AMAZON_PRICE_TYPE];
+      const deltaPercent = d.deltaPercent?.[0]?.[AMAZON_PRICE_TYPE];
+      const salesRank = d.current?.[SALES_RANK_TYPE];
 
-    const price = typeof currentCents === "number" && currentCents >= 0 ? currentCents / 100 : null;
-    const validDeltaPercent = typeof deltaPercent === "number" && deltaPercent >= 0 ? deltaPercent : null;
-    const originalPrice =
-      price != null && validDeltaPercent != null && validDeltaPercent < 100
-        ? price / (1 - validDeltaPercent / 100)
-        : null;
+      const price = typeof currentCents === "number" && currentCents >= 0 ? currentCents / 100 : null;
+      const validDeltaPercent = typeof deltaPercent === "number" && deltaPercent >= 0 ? deltaPercent : null;
+      const originalPrice =
+        price != null && validDeltaPercent != null && validDeltaPercent < 100
+          ? price / (1 - validDeltaPercent / 100)
+          : null;
 
-    const imageFilename = Array.isArray(d.image) ? d.image.map((code) => String.fromCharCode(code)).join("") : null;
+      const imageFilename = Array.isArray(d.image) ? d.image.map((code) => String.fromCharCode(code)).join("") : null;
 
-    return {
-      id: `keepa-${d.asin}`,
-      title: d.title || d.asin,
-      link: `https://www.amazon.com/dp/${d.asin}`,
-      description: null,
-      imageUrl: imageFilename ? `https://m.media-amazon.com/images/I/${imageFilename}` : null,
-      pubDate: null,
-      creator: null,
-      discountPercent: validDeltaPercent,
-      price,
-      originalPrice,
-    };
-  });
+      const rankNote =
+        typeof salesRank === "number" && salesRank > 0
+          ? `Category sales rank #${salesRank.toLocaleString()} · ${d.salesRankDrops90} sale(s) in last 90 days`
+          : null;
+
+      return {
+        id: `keepa-${d.asin}`,
+        title: d.title || d.asin,
+        link: `https://www.amazon.com/dp/${d.asin}`,
+        description: rankNote,
+        imageUrl: imageFilename ? `https://m.media-amazon.com/images/I/${imageFilename}` : null,
+        pubDate: null,
+        creator: null,
+        discountPercent: validDeltaPercent,
+        price,
+        originalPrice,
+      };
+    });
+
+  return deals;
 }
+
+const SALES_RANK_TYPE = 3; // Keepa's standard CSV-type index for category sales rank
 
 type KeepaDeal = {
   asin: string;
@@ -91,4 +113,5 @@ type KeepaDeal = {
   current?: number[];
   deltaPercent?: number[][];
   image?: number[];
+  salesRankDrops90?: number;
 };

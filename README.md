@@ -38,7 +38,9 @@ cp .env.example .env
 ```
 
 Add your Keepa API key to `.env` as `KEEPA_API_KEY`. `KEEPA_MIN_DISCOUNT`
-(default 40) sets the minimum percent-off threshold for results.
+(default 40) sets the minimum percent-off threshold, and `KEEPA_MAX_SALES_RANK`
+(default 300000) filters out obscure items — see "Filtering out fake-looking
+deals" below for why that second one matters.
 
 **Verified against a real account on 2026-09-08.** Keepa's API docs site
 (keepa.com/api-docs) returns 403 to automated fetches, so this was built
@@ -58,6 +60,32 @@ working correctly the whole time. Fixed and confirmed: a live run returned
 percentages landing inside the requested range once read from the right
 place. Product images also work: Keepa's `image` field is an array of ASCII
 character codes that decodes to a real filename on their image CDN.
+
+### Filtering out fake-looking deals
+
+A big "% off" from Keepa isn't always a real deal — the "original price" it's
+measured against can be a one-off data glitch, or an inflated list price
+nobody ever actually paid (self-published books are especially bad for
+this: a $150 "list price" that was never real, discounted to $4.60, reads
+as "97% off" but was never a $150 item to begin with). Two independent
+checks now filter these out:
+
+1. **Request-level**: `salesRankRange` (capped by `KEEPA_MAX_SALES_RANK`)
+   excludes items with near-zero real sales, and `hasReviews: true` requires
+   at least one actual customer review.
+2. **Response-level**: `salesRankDrops90` — the number of times the item's
+   sales rank actually dropped (a real sale happening) in the last 90 days —
+   must be greater than zero. This field is confirmed present on every deal
+   object from live testing, so it's a hard requirement, not a guess.
+
+Verified against live data: the three most obviously-wrong results from
+before this filter existed (a $150 community directory book, a random
+Italian novel, an obscure trilogy book — all down to $4-13 with 90%+ "off")
+are gone now, replaced by recognizable branded products (adidas, Field &
+Stream, Amazon Essentials) with visible sales rank and a real recent-sale
+count. The feed also now shows that sales rank + sale count directly under
+each Keepa deal's title, so you can sanity-check it yourself without
+clicking through to Amazon.
 
 ## Using it efficiently
 
