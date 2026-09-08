@@ -13,6 +13,7 @@
   --series-1: #2a78d6; /* accent */
   --good: #006300;
   --critical: #d03b3b;
+  --stack: #eda100; /* stackable-deal highlight */
 }
 
 @theme inline {
@@ -36,6 +37,7 @@
     --series-1: #3987e5;
     --good: #0ca30c;
     --critical: #e66767;
+    --stack: #c98500;
   }
 }
 

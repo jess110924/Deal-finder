@@ -9,6 +9,7 @@ export type Deal = {
   discountPercent?: number | null;
   price?: number | null; // dollars
   originalPrice?: number | null; // dollars
+  isStackable?: boolean; // Subscribe & Save / coupon-stacking style deal — see lib/stackable.ts
 };
 
-export type RawDeal = Omit<Deal, "source">;
+export type RawDeal = Omit<Deal, "source" | "isStackable">;

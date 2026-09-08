@@ -47,6 +47,7 @@ export default function DealFeed() {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [activeSources, setActiveSources] = useState<Set<string>>(new Set(SOURCES.map((s) => s.name)));
   const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [stackableOnly, setStackableOnly] = useState(false);
 
   useEffect(() => {
     // Reading localStorage must happen client-side only — a lazy useState
@@ -111,7 +112,11 @@ export default function DealFeed() {
 
   // No manual useMemo here — the React Compiler (enabled in this Next.js
   // version) handles memoizing derived values like this automatically.
-  const filteredDeals = data ? data.deals.filter((d) => !dismissed.has(d.id) && activeSources.has(d.source)) : [];
+  const filteredDeals = data
+    ? data.deals.filter(
+        (d) => !dismissed.has(d.id) && activeSources.has(d.source) && (!stackableOnly || d.isStackable)
+      )
+    : [];
   const visibleDeals =
     sortMode === "discount"
       ? [...filteredDeals].sort((a, b) => (b.discountPercent ?? -1) - (a.discountPercent ?? -1))
@@ -171,6 +176,23 @@ export default function DealFeed() {
         })}
       </div>
 
+      <div className="flex gap-2 flex-wrap items-center">
+        <button
+          onClick={() => setStackableOnly((v) => !v)}
+          className="rounded-full px-3 py-1 text-xs font-medium"
+          style={{
+            background: stackableOnly ? "var(--stack)" : "var(--surface-1)",
+            color: stackableOnly ? "#fff" : "var(--stack)",
+            border: "1px solid var(--stack)",
+          }}
+        >
+          ⭐ Stackable only
+        </button>
+        <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+          Subscribe & Save + coupon-stacking style deals
+        </span>
+      </div>
+
       <div className="flex gap-2 text-sm">
         <span style={{ color: "var(--text-muted)" }}>Sort:</span>
         <button
@@ -228,6 +250,11 @@ function DealRow({ deal, onDismiss }: { deal: Deal; onDismiss: () => void }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-xs mb-1" style={{ color: "var(--text-muted)" }}>
           <span>{sourceLabel}</span>
+          {deal.isStackable && (
+            <span className="font-semibold" style={{ color: "var(--stack)" }}>
+              ⭐ Stackable
+            </span>
+          )}
           {deal.pubDate && (
             <>
               <span>·</span>

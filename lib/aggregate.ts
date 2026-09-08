@@ -3,6 +3,7 @@ import * as rss from "@/lib/sources/rss";
 import * as cheapshark from "@/lib/sources/cheapshark";
 import * as epic from "@/lib/sources/epic";
 import * as keepa from "@/lib/sources/keepa";
+import { isStackableDeal } from "@/lib/stackable";
 import type { Deal, RawDeal } from "@/lib/types";
 
 export type SourceResult = { name: string; label: string; ok: boolean; error?: string; count: number };
@@ -30,7 +31,9 @@ export async function aggregateDeals(): Promise<{ deals: Deal[]; results: Source
             break;
         }
 
-        for (const d of raw) deals.push({ ...d, source: source.name });
+        for (const d of raw) {
+          deals.push({ ...d, source: source.name, isStackable: isStackableDeal(d.title, d.description) });
+        }
         results.push({ name: source.name, label: source.label, ok: true, count: raw.length });
       } catch (err) {
         results.push({ name: source.name, label: source.label, ok: false, error: (err as Error).message, count: 0 });
