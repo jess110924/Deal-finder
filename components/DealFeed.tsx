@@ -247,6 +247,19 @@ function DealRow({ deal, onDismiss }: { deal: Deal; onDismiss: () => void }) {
       className="rounded-lg p-3 flex gap-3 items-start"
       style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
     >
+      {deal.imageUrl && (
+        // eslint-disable-next-line @next/next/no-img-element -- external, unpredictable source; next/image's domain allowlist isn't worth it for one field
+        <img
+          src={deal.imageUrl}
+          alt=""
+          className="w-12 h-12 rounded-md object-contain shrink-0"
+          style={{ background: "#fff" }}
+          loading="lazy"
+          onError={(e) => {
+            e.currentTarget.style.display = "none";
+          }}
+        />
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-xs mb-1" style={{ color: "var(--text-muted)" }}>
           <span>{sourceLabel}</span>

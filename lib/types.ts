@@ -4,6 +4,7 @@ export type Deal = {
   title: string;
   link: string;
   description?: string | null;
+  imageUrl?: string | null;
   pubDate: string | null; // ISO string
   creator?: string | null;
   discountPercent?: number | null;

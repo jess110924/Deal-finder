@@ -40,29 +40,24 @@ cp .env.example .env
 Add your Keepa API key to `.env` as `KEEPA_API_KEY`. `KEEPA_MIN_DISCOUNT`
 (default 40) sets the minimum percent-off threshold for results.
 
-**Important — this integration is unverified against a real key.** Keepa's
-API docs site (keepa.com/api-docs) returns 403 to automated fetches, so this
-was built directly from their official Python client's source code
-(github.com/akaszynski/keepa) — which confirms the request/response shape
-(endpoint, auth, the `dr` array of deals with `asin`/`title`/`current`/
-`deltaPercent`), but two filter flags (`isRangeEnabled`, `isFilterEnabled`)
-are included based on their names, not confirmed against real behavior,
-since I have no Keepa key to test with myself. See the comments in
-`lib/sources/keepa.ts` for exactly what's confirmed vs. inferred.
+**Verified against a real account on 2026-09-08.** Keepa's API docs site
+(keepa.com/api-docs) returns 403 to automated fetches, so this was built
+from their official Python client's source code (github.com/akaszynski/keepa)
+first, then corrected against real output once a key was available. One real
+bug turned up that way: `current` is a flat array indexed by price type, but
+`delta`/`deltaPercent`/`avg` are each a *nested* array of 4 windows —
+`deltaPercent[window][priceType]`, not `deltaPercent[priceType]`. Reading it
+at the wrong depth silently returned `undefined` for every deal (caught by a
+defensive type-check, so it failed quiet rather than crashing) — every
+result showed no discount at all, even though the actual filtering was
+working correctly the whole time. Fixed and confirmed: a live run returned
+150 deals, all with real 40–100% discounts matching the requested range.
 
-**When you first run this with a real key**, check:
-- Do results actually respect `KEEPA_MIN_DISCOUNT`, or come back unfiltered?
-  If unfiltered, `isRangeEnabled`/`isFilterEnabled` are the first thing to
-  try toggling.
-- Do prices look right, or off by 100x? (Assumed Keepa returns cents.)
-- Is `sortType: 4` actually giving biggest-drop-first? (The website's own
-  "Biggest discount" sort button doesn't depend on this being right — it
-  re-sorts client-side regardless — so this only affects ordering *within*
-  Keepa's raw response before the website re-sorts it.)
-
-If something's off, tell me what the actual response looks like and I'll
-fix the mapping — this is a five-minute fix once we can see real output,
-just not something I could get right blind.
+`isRangeEnabled` / `isFilterEnabled` are also now confirmed to actually gate
+`deltaPercentRange` (not just plausibly named) — verified by the returned
+percentages landing inside the requested range once read from the right
+place. Product images also work: Keepa's `image` field is an array of ASCII
+character codes that decodes to a real filename on their image CDN.
 
 ## Using it efficiently
 
