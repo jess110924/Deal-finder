@@ -31,7 +31,7 @@ type CheapSharkDeal = {
  */
 export async function fetchDeals(): Promise<RawDeal[]> {
   const url = `${API_BASE}/deals?upperPrice=0&pageSize=60`;
-  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT }, cache: "no-store" });
+  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT }, next: { revalidate: 600 } });
   if (!res.ok) {
     throw new Error(`CheapShark request failed: ${res.status} ${res.statusText}`);
   }

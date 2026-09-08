@@ -6,10 +6,15 @@ import type { RawDeal } from "@/lib/types";
 // Reddit) — extending the type here rather than casting at every use site.
 type FeedItem = { description?: string; author?: string };
 
-// A descriptive User-Agent is required by some feeds (Reddit and CheapShark
-// both reject default/generic ones outright) and is good etiquette anyway.
+const USER_AGENT = "DealFinder/1.0 (personal project)"; // Reddit and CheapShark both reject default/generic ones outright
+
+// Constructed with no request options — the actual HTTP fetch happens
+// separately via the global `fetch` below (see fetchDeals), specifically so
+// it can go through Next.js's fetch cache. rss-parser's own parseURL() uses
+// its own internal HTTP client, which bypasses that cache entirely; feeding
+// it pre-fetched text via parseString() instead keeps the parsing logic but
+// makes the network call cacheable.
 const parser: Parser<Record<string, unknown>, FeedItem> = new Parser({
-  headers: { "User-Agent": "DealFinder/1.0 (personal project)" },
   customFields: { item: [["dc:creator", "creator"]] },
 });
 
@@ -28,7 +33,18 @@ function cleanDescription(raw: string): string {
  * or any other blog/forum feed.
  */
 export async function fetchDeals(feedUrl: string): Promise<RawDeal[]> {
-  const feed = await parser.parseURL(feedUrl);
+  // Cached for 10 minutes at the Next.js/hosting layer — protects against
+  // Reddit's aggressive per-IP rate limiting under real traffic, and is
+  // generally polite to free sources that don't expect bot-speed polling.
+  const res = await fetch(feedUrl, {
+    headers: { "User-Agent": USER_AGENT },
+    next: { revalidate: 600 },
+  });
+  if (!res.ok) {
+    throw new Error(`Feed request failed: ${res.status} ${res.statusText}`);
+  }
+  const xml = await res.text();
+  const feed = await parser.parseString(xml);
   return feed.items.map((item) => ({
     id: item.guid || item.link || item.title || "",
     title: item.title || "(untitled deal)",

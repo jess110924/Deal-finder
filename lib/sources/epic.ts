@@ -22,7 +22,7 @@ type EpicElement = {
  * this deliberately excludes.
  */
 export async function fetchDeals(): Promise<RawDeal[]> {
-  const res = await fetch(API_URL, { cache: "no-store" });
+  const res = await fetch(API_URL, { next: { revalidate: 600 } });
   if (!res.ok) {
     throw new Error(`Epic Games request failed: ${res.status} ${res.statusText}`);
   }

@@ -103,6 +103,26 @@ clicking through to Amazon.
 Dismissed-state is per-browser, not per-account — clearing browser data or
 switching browsers resets it.
 
+## Deploying publicly
+
+Every source is cached for 10-15 minutes at the fetch layer (`next:
+{revalidate}`), so repeated page loads within that window don't re-hit the
+underlying APIs — this matters most for Keepa, a paid, token-limited
+resource, but is also just polite to the free sources.
+
+That caching alone isn't enough once this has a public URL, though — a
+bot or crawler finding the link could still trigger fresh fetches often
+enough to matter. So the whole site (including `/api/deals`) sits behind a
+single shared password:
+
+```
+SITE_PASSWORD=pick-something-real
+```
+
+Set in your hosting platform's environment variables (never in a file that
+gets committed). Leaving it unset only makes sense for local-only use — the
+site is wide open without it.
+
 ## Project structure
 
 - `app/page.tsx` — renders the feed
@@ -113,3 +133,4 @@ switching browsers resets it.
 - `lib/sources/rss.ts` — RSS/Atom fetcher (Slickdeals, Reddit, DansDeals)
 - `lib/sources/cheapshark.ts`, `epic.ts` — free-game APIs
 - `lib/sources/keepa.ts` — Amazon price-drop search (needs your API key)
+- `lib/auth.ts`, `proxy.ts`, `app/login/` — the password gate

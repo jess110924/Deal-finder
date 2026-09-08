@@ -49,7 +49,10 @@ export async function fetchDeals(minDiscountPercent = 40): Promise<RawDeal[]> {
   url.searchParams.set("domain", String(US_DOMAIN_ID));
   url.searchParams.set("selection", JSON.stringify(selection));
 
-  const res = await fetch(url.toString(), { cache: "no-store" });
+  // Cached longer than the free sources (15 min vs 10) since Keepa tokens
+  // are a limited, paid resource — this is on top of the password gate in
+  // proxy.ts, not instead of it.
+  const res = await fetch(url.toString(), { next: { revalidate: 900 } });
   if (!res.ok) {
     throw new Error(`Keepa request failed: ${res.status} ${res.statusText}`);
   }
