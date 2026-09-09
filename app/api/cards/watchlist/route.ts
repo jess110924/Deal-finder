@@ -2,21 +2,33 @@ import { NextRequest, NextResponse } from "next/server";
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from "@/lib/db";
 
 export async function GET() {
-  return NextResponse.json({ watchlist: await getWatchlist() });
+  try {
+    return NextResponse.json({ watchlist: await getWatchlist() });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
-  const { name } = await request.json();
-  if (!name || typeof name !== "string") {
-    return NextResponse.json({ error: "Missing 'name'." }, { status: 400 });
+  try {
+    const { name } = await request.json();
+    if (!name || typeof name !== "string") {
+      return NextResponse.json({ error: "Missing 'name'." }, { status: 400 });
+    }
+    return NextResponse.json({ watchlist: await addToWatchlist(name.trim()) });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
-  return NextResponse.json({ watchlist: await addToWatchlist(name.trim()) });
 }
 
 export async function DELETE(request: NextRequest) {
-  const { name } = await request.json();
-  if (!name || typeof name !== "string") {
-    return NextResponse.json({ error: "Missing 'name'." }, { status: 400 });
+  try {
+    const { name } = await request.json();
+    if (!name || typeof name !== "string") {
+      return NextResponse.json({ error: "Missing 'name'." }, { status: 400 });
+    }
+    return NextResponse.json({ watchlist: await removeFromWatchlist(name.trim()) });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
-  return NextResponse.json({ watchlist: await removeFromWatchlist(name.trim()) });
 }

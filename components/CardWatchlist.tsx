@@ -8,15 +8,24 @@ export default function CardWatchlist() {
   const [finds, setFinds] = useState<SavedFind[]>([]);
   const [newCard, setNewCard] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   async function loadAll() {
     setLoading(true);
-    const [watchlistRes, findsRes] = await Promise.all([fetch("/api/cards/watchlist"), fetch("/api/cards/finds")]);
-    const watchlistJson = await watchlistRes.json();
-    const findsJson = await findsRes.json();
-    setWatchlist(watchlistJson.watchlist ?? []);
-    setFinds(findsJson.finds ?? []);
-    setLoading(false);
+    setError(null);
+    try {
+      const [watchlistRes, findsRes] = await Promise.all([fetch("/api/cards/watchlist"), fetch("/api/cards/finds")]);
+      const watchlistJson = await watchlistRes.json();
+      const findsJson = await findsRes.json();
+      if (!watchlistRes.ok) throw new Error(watchlistJson.error || "Failed to load watchlist.");
+      if (!findsRes.ok) throw new Error(findsJson.error || "Failed to load saved finds.");
+      setWatchlist(watchlistJson.watchlist ?? []);
+      setFinds(findsJson.finds ?? []);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -27,37 +36,68 @@ export default function CardWatchlist() {
   async function addCard(e: React.FormEvent) {
     e.preventDefault();
     if (!newCard.trim()) return;
-    const res = await fetch("/api/cards/watchlist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newCard.trim() }),
-    });
-    const json = await res.json();
-    setWatchlist(json.watchlist ?? []);
-    setNewCard("");
+    setError(null);
+    try {
+      const res = await fetch("/api/cards/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newCard.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
+      setWatchlist(json.watchlist ?? []);
+      setNewCard("");
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   async function removeCard(name: string) {
-    const res = await fetch("/api/cards/watchlist", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const json = await res.json();
-    setWatchlist(json.watchlist ?? []);
+    setError(null);
+    try {
+      const res = await fetch("/api/cards/watchlist", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
+      setWatchlist(json.watchlist ?? []);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   async function dismissFind(itemId: string) {
+    const previous = finds;
     setFinds((prev) => prev.filter((f) => f.itemId !== itemId)); // optimistic
-    await fetch("/api/cards/finds", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemId }),
-    });
+    try {
+      const res = await fetch("/api/cards/finds", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId }),
+      });
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error || `Request failed: ${res.status}`);
+      }
+    } catch (err) {
+      setFinds(previous); // roll back the optimistic removal
+      setError((err as Error).message);
+    }
   }
 
   return (
     <div className="flex flex-col gap-8">
+      {error && (
+        <div
+          className="rounded-md px-3 py-2 text-sm"
+          style={{ background: "var(--surface-1)", border: "1px solid var(--critical)", color: "var(--critical)" }}
+        >
+          {error}
+        </div>
+      )}
+
       <div>
         <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
           Watchlist
