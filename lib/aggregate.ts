@@ -1,5 +1,6 @@
 import { SOURCES } from "@/lib/config";
 import * as rss from "@/lib/sources/rss";
+import * as reddit from "@/lib/sources/reddit";
 import * as cheapshark from "@/lib/sources/cheapshark";
 import * as epic from "@/lib/sources/epic";
 import * as keepa from "@/lib/sources/keepa";
@@ -19,6 +20,9 @@ export async function aggregateDeals(): Promise<{ deals: Deal[]; results: Source
         switch (source.type) {
           case "rss":
             raw = await rss.fetchDeals(source.url!);
+            break;
+          case "reddit":
+            raw = await reddit.fetchDeals(source.subreddit!);
             break;
           case "cheapshark":
             raw = await cheapshark.fetchDeals();

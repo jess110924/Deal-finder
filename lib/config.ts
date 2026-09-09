@@ -1,8 +1,9 @@
 export type SourceConfig = {
   name: string;
   label: string;
-  type: "rss" | "cheapshark" | "epic" | "keepa";
-  url?: string;
+  type: "rss" | "reddit" | "cheapshark" | "epic" | "keepa";
+  url?: string; // rss only
+  subreddit?: string; // reddit only
 };
 
 export const SOURCES: SourceConfig[] = [
@@ -18,14 +19,11 @@ export const SOURCES: SourceConfig[] = [
     type: "rss",
     url: "https://slickdeals.net/newsearch.php?searchin=first&forumchoice%5B%5D=9&rss=1",
   },
-  { name: "reddit-deals", label: "r/deals", type: "rss", url: "https://www.reddit.com/r/deals/new/.rss" },
-  { name: "reddit-gamedeals", label: "r/GameDeals", type: "rss", url: "https://www.reddit.com/r/GameDeals/new/.rss" },
-  {
-    name: "reddit-buildapcsales",
-    label: "r/buildapcsales",
-    type: "rss",
-    url: "https://www.reddit.com/r/buildapcsales/new/.rss",
-  },
+  // Reddit sources disabled pending their app review (registered 2026-09-08,
+  // awaiting approval) — re-enable once REDDIT_CLIENT_ID/SECRET are live.
+  // { name: "reddit-deals", label: "r/deals", type: "reddit", subreddit: "deals" },
+  // { name: "reddit-gamedeals", label: "r/GameDeals", type: "reddit", subreddit: "GameDeals" },
+  // { name: "reddit-buildapcsales", label: "r/buildapcsales", type: "reddit", subreddit: "buildapcsales" },
   { name: "dansdeals", label: "DansDeals", type: "rss", url: "https://www.dansdeals.com/feed/" },
   { name: "free-games-cheapshark", label: "CheapShark (free games)", type: "cheapshark" },
   { name: "free-games-epic", label: "Epic Games (free games)", type: "epic" },

@@ -31,6 +31,22 @@ actually provides — verified against live data for each, not assumed:
 A source with no image for a given post (rare, but happens) just omits the
 thumbnail rather than showing a broken-image icon.
 
+## Reddit sources are currently disabled
+
+`r/deals`, `r/GameDeals`, `r/buildapcsales` are commented out in
+`lib/config.ts`. What happened: Reddit blocks/rate-limits (403/429)
+anonymous scraping traffic from cloud hosting IPs like Vercel's, regardless
+of request volume — this showed up in production even though local testing
+looked fine. The real fix is Reddit's OAuth API (`lib/sources/reddit.ts`,
+already built), which gets treated as a legitimate authenticated client
+rather than a scraper. That requires a Reddit "script" app — but Reddit's
+current app-registration flow includes a review questionnaire (not just an
+instant create-and-go), so this is on hold pending that approval.
+
+To re-enable once approved: add `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET`
+to `.env` (and to Vercel's environment variables + redeploy), then
+uncomment the three `reddit-*` entries in `lib/config.ts`.
+
 ## Getting started
 
 ```bash
