@@ -6,6 +6,7 @@ import {
   buildReferenceInfo,
   type CardCategory,
 } from "@/lib/cardComparison";
+import { extractSearchKeywords } from "@/lib/cardKeywords";
 import { saveNewFinds, type SavedFind } from "@/lib/db";
 
 // Browsed listings are freeform real-world titles, not a deliberate search
@@ -44,9 +45,18 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
       continue;
     }
 
+    // Discover has no separately-known player name to anchor on (unlike
+    // Player Search, which gets it from the search box) — this can only
+    // go by whatever it can infer from the title itself, and quietly
+    // no-ops back to the full title when it can't confidently do that
+    // (see extractSearchKeywords). Confirmed live this matters: feeding
+    // PriceCharting a full messy title returned a rare autographed
+    // jersey matched against an unrelated $6.50 base card.
+    const query = extractSearchKeywords(listing.title);
+
     let reference;
     try {
-      reference = await findCard(listing.title, category);
+      reference = await findCard(query, category);
     } catch {
       continue; // one bad PriceCharting lookup shouldn't kill the whole run
     }
@@ -56,7 +66,7 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
       ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
     if (percentBelowReference < DISCOVERY_THRESHOLD_PERCENT) continue;
 
-    const referenceInfo = await buildReferenceInfo(listing.title, reference);
+    const referenceInfo = await buildReferenceInfo(query, reference);
     candidates.push({
       itemId: listing.itemId,
       title: listing.title,

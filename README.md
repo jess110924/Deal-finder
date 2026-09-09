@@ -125,6 +125,43 @@ real search for 15-20+ cards sequentially would risk timing out) and
 just get picked up on the next scheduled run, same as any other add that
 happens to miss its instant check.
 
+This needed two things the rest of the project doesn't use: an actual
+database, and a way to run checks on a schedule with nobody's browser
+open.
+
+**Database**: [Upstash Redis](https://vercel.com/marketplace/upstash) via
+Vercel's Storage tab (free tier: 256MB, 30K commands/day — far more than
+this needs). Connecting it auto-injects `KV_REST_API_URL` /
+`KV_REST_API_TOKEN`, which `lib/db.ts` reads automatically — no manual
+key-copying for this one.
+
+**Scheduling**: Vercel's own Cron Jobs cap out at once per day on the free
+Hobby plan (any more frequent schedule fails at deploy time) — too coarse
+for catching a listing before someone else buys it. Instead,
+`.github/workflows/check-watchlist.yml` runs on a GitHub Actions schedule
+every 30 minutes (no such cap there, and it's free) and calls
+`POST /api/cards/check-watchlist` on the deployed site. That endpoint sits
+outside the site's normal cookie-based login (see `proxy.ts`) since a
+script has no browser session to present — it checks its own secret
+instead.
+
+#### Setup
+
+1. In Vercel: **Storage** tab → **Create Database** → **Upstash** → **Redis**
+   → free tier → **Connect** to this project. This injects the two
+   `KV_REST_API_URL`/`KV_REST_API_TOKEN` variables automatically.
+2. Pick a random secret value and add it as `CRON_SECRET` in **both**:
+   - Vercel's environment variables (so the endpoint recognizes it)
+   - This GitHub repo's **Settings → Secrets and variables → Actions** (so
+     the workflow can send it) — same value in both places
+3. Also add a second GitHub Actions secret, `DEAL_FINDER_URL`, set to your
+   deployed site's URL (e.g. `https://deal-finder-yourname.vercel.app`,
+   **no trailing slash**)
+4. Redeploy (any push does this, or trigger one manually)
+5. To test without waiting up to 30 minutes: on GitHub, go to **Actions**
+   tab → "Check card watchlist" workflow → **Run workflow** button
+   (works because of the `workflow_dispatch` trigger in the yml file)
+
 ### Discover — finding deals without naming a card first
 
 The watchlist only ever checks cards it's explicitly told about — it
@@ -192,42 +229,90 @@ No separate setup needed — it reuses the same `PRICECHARTING_API_KEY`,
 `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`, `CRON_SECRET`, and
 `DEAL_FINDER_URL` GitHub secret already configured for the watchlist.
 
-This needed two things the rest of the project doesn't use: an actual
-database, and a way to run checks on a schedule with nobody's browser
-open.
+### Player Search — the manual "browse a player, then check the margin" workflow
 
-**Database**: [Upstash Redis](https://vercel.com/marketplace/upstash) via
-Vercel's Storage tab (free tier: 256MB, 30K commands/day — far more than
-this needs). Connecting it auto-injects `KV_REST_API_URL` /
-`KV_REST_API_TOKEN`, which `lib/db.ts` reads automatically — no manual
-key-copying for this one.
+Built to replace a specific manual process directly: search a player,
+scan for cards in a $30-$100 sweet spot, pick one, then check what
+similar listings of that exact card go for before buying. `PlayerSearch`
+(`components/PlayerSearch.tsx`, `lib/playerSearch.ts`,
+`app/api/cards/player-search` + `app/api/cards/peer-check`) does the
+first part as a plain price-banded eBay browse (no PriceCharting
+reference — a player name isn't one product) and the second as an
+on-demand "Check similar listings" button per result.
 
-**Scheduling**: Vercel's own Cron Jobs cap out at once per day on the free
-Hobby plan (any more frequent schedule fails at deploy time) — too coarse
-for catching a listing before someone else buys it. Instead,
-`.github/workflows/check-watchlist.yml` runs on a GitHub Actions schedule
-every 30 minutes (no such cap there, and it's free) and calls
-`POST /api/cards/check-watchlist` on the deployed site. That endpoint sits
-outside the site's normal cookie-based login (see `proxy.ts`) since a
-script has no browser session to present — it checks its own secret
-instead.
+The "similar listings" comparison is against other **currently active**
+asking prices, not recent sold prices — no eBay API key gets access to
+sold/completed listing data (confirmed live: the scope that would need,
+`buy.marketplace.insights`, comes back `invalid_scope` for this app's
+key — it's a separately-approved, restricted API most developer accounts
+don't have). A real caveat worth remembering: if every seller of a card
+happens to be overpricing it right now, this baseline is inflated right
+along with them.
 
-#### Setup
+### The keyword-extraction fix — why raw eBay titles make bad search queries
 
-1. In Vercel: **Storage** tab → **Create Database** → **Upstash** → **Redis**
-   → free tier → **Connect** to this project. This injects the two
-   `KV_REST_API_URL`/`KV_REST_API_TOKEN` variables automatically.
-2. Pick a random secret value and add it as `CRON_SECRET` in **both**:
-   - Vercel's environment variables (so the endpoint recognizes it)
-   - This GitHub repo's **Settings → Secrets and variables → Actions** (so
-     the workflow can send it) — same value in both places
-3. Also add a second GitHub Actions secret, `DEAL_FINDER_URL`, set to your
-   deployed site's URL (e.g. `https://deal-finder-yourname.vercel.app`,
-   **no trailing slash**)
-4. Redeploy (any push does this, or trigger one manually)
-5. To test without waiting up to 30 minutes: on GitHub, go to **Actions**
-   tab → "Check card watchlist" workflow → **Run workflow** button
-   (works because of the `workflow_dispatch` trigger in the yml file)
+Reported directly, and confirmed live to be a serious problem, not a
+minor one: feeding a full eBay title into either PriceCharting's search
+or eBay's own search frequently returns the *wrong* product. Two
+separate live failures drove this:
+
+1. PriceCharting matched a rare 1-of-10 autographed jersey card against
+   an unrelated $6.50 base card that happened to share enough words.
+2. eBay's own keyword search, used for the peer/similar-listings
+   comparison above, pulled a $2.25 "Blue Shimmer Prizm" into the
+   "peers" of a "Gold Wave Prizms" card — and even after narrowing to
+   just the distinctive phrase ("Blue Refractor"), it still pulled in a
+   different, far cheaper "Red White & Blue Refractor" parallel, since
+   that phrase contains the shorter one as a substring.
+
+`lib/cardKeywords.ts` (`extractSearchKeywords`) fixes this by rewriting
+a raw title into a short, targeted query: **subject + color/finish words
+that actually identify the specific parallel + serial number**, dropping
+year/brand/set noise. Confirmed live against the reported example:
+`"Jalen Johnson 2025-26 Topps Chrome ORANGE Leather Refractor /25 Serial
+Numbered"` → `"Jalen Johnson orange refractor /25"`.
+
+A few things that made this trickier than it looks:
+
+- **Word-boundary matching, not substring.** A naive `.includes()` check
+  matched the color "red" inside "Serial **Numbe­red**" — confirmed live,
+  it added a bogus "red" to every single query built from a title
+  carrying that boilerplate phrase. Fixed with `\b`-anchored regexes.
+- **"mint" is deliberately not a recognized color** — it's an extremely
+  common condition term ("Near Mint", "Gem Mint") that would falsely
+  match as the "Mint" parallel color on a large fraction of listings.
+- **The serial-number denominator ("/150") is a second, independent
+  safety net**, applied to the actual search *results* regardless of
+  whether the query rewrite above could identify a subject to rewrite
+  around. This matters: plenty of real titles start with the year, not
+  the player, where the rewrite can't confidently proceed at all — but
+  filtering results by a shared "/150" still cleanly separates real
+  peers from same-named-but-different parallels, confirmed live.
+- **Only activates when there's an actual parallel/serial signal to
+  preserve**, and only when a subject (given directly by Player Search,
+  or guessed for Discover) can be identified. A plain base-card query
+  passes through unchanged — there's nothing to disambiguate, and the
+  full query already works fine for those (extensively tested earlier
+  in this project). This also means the main search box and watchlist
+  only get rewritten when a print-run number is present — a short
+  deliberate query like "2018 Panini Prizm Luka Doncic" is left alone,
+  since rewriting it risks dropping the year and matching the wrong
+  season's card instead.
+- **Residual limitation, left visible rather than hidden:** even after
+  both fixes, different sets/years can coincidentally share the same
+  parallel name *and* the same print-run size (e.g. "Blue Refractor
+  /150" exists across several different Topps/Bowman products across
+  different years) — confirmed live, a peer-check still returned a
+  genuine mix of these. Rather than trying to solve this perfectly, the
+  full peer list is shown in the UI ("Show all N — check these are
+  actually the same parallel") so a mismatch like this stays visible and
+  checkable instead of silently skewing a hidden average.
+
+This is used in three places: Player Search's peer-check (has a known
+subject from the search box), Discover's per-listing PriceCharting
+lookup (no known subject — falls back to a best-effort guess, or leaves
+the title unchanged if it can't tell), and the main search box / watchlist
+(only when the query itself carries a serial number).
 
 ## Stack
 
@@ -409,3 +494,6 @@ site is wide open without it.
 - `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action
 - `lib/cardDiscovery.ts` — browses eBay live listings for deals with no name given
 - `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the hourly Discover run
+- `components/PlayerSearch.tsx`, `lib/playerSearch.ts` — price-banded player browse + peer-listing check
+- `app/api/cards/player-search/route.ts`, `app/api/cards/peer-check/route.ts` — their endpoints
+- `lib/cardKeywords.ts` — rewrites a raw eBay title into a short, targeted search query

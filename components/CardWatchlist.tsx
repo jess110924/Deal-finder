@@ -175,14 +175,27 @@ export default function CardWatchlist() {
           ))}
         </div>
         <form onSubmit={addCard} className="flex gap-2 mb-3">
-          <input
-            type="text"
-            value={newCard}
-            onChange={(e) => setNewCard(e.target.value)}
-            placeholder={category === "sports" ? "e.g. 2018 Panini Prizm Luka Doncic" : "e.g. 1999 Base Set Charizard"}
-            className="flex-1 rounded-md px-3 py-2 text-sm"
-            style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
-          />
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={newCard}
+              onChange={(e) => setNewCard(e.target.value)}
+              placeholder={category === "sports" ? "e.g. 2018 Panini Prizm Luka Doncic" : "e.g. 1999 Base Set Charizard"}
+              className="w-full rounded-md pl-3 pr-8 py-2 text-sm"
+              style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
+            />
+            {newCard && (
+              <button
+                type="button"
+                onClick={() => setNewCard("")}
+                aria-label="Clear"
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-sm rounded-full"
+                style={{ color: "var(--text-muted)" }}
+              >
+                ×
+              </button>
+            )}
+          </div>
           <button
             type="submit"
             disabled={checking}
@@ -209,14 +222,27 @@ export default function CardWatchlist() {
 
         {showBulkAdd && (
           <form onSubmit={bulkAdd} className="mb-4 flex flex-col gap-2">
-            <textarea
-              value={bulkText}
-              onChange={(e) => setBulkText(e.target.value)}
-              placeholder={"One card per line (or comma-separated), e.g.\n2023 Panini Prizm Victor Wembanyama\n2018 Panini Prizm Luka Doncic\nPanini Prizm Nikola Jokic"}
-              rows={5}
-              className="rounded-md px-3 py-2 text-sm"
-              style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
-            />
+            <div className="relative">
+              <textarea
+                value={bulkText}
+                onChange={(e) => setBulkText(e.target.value)}
+                placeholder={"One card per line (or comma-separated), e.g.\n2023 Panini Prizm Victor Wembanyama\n2018 Panini Prizm Luka Doncic\nPanini Prizm Nikola Jokic"}
+                rows={5}
+                className="w-full rounded-md pl-3 pr-8 py-2 text-sm"
+                style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
+              />
+              {bulkText && (
+                <button
+                  type="button"
+                  onClick={() => setBulkText("")}
+                  aria-label="Clear"
+                  className="absolute right-2 top-2 w-5 h-5 flex items-center justify-center text-sm rounded-full"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
               Adds all as {CATEGORY_LABEL[category]}. These skip the instant check (too many to search all
               at once) and get picked up on the next scheduled run, within ~30 minutes.

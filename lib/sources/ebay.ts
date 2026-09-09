@@ -78,18 +78,36 @@ function mapItemSummary(item: Record<string, unknown>): EbayListing {
   };
 }
 
+export type SearchListingsOptions = {
+  limit?: number;
+  minPriceDollars?: number;
+  maxPriceDollars?: number;
+  sort?: "bestMatch" | "price" | "-price" | "newlyListed";
+};
+
 export async function searchListings(
   query: string,
   category: keyof typeof CATEGORY_ID_BY_CARD_CATEGORY,
-  limit = 30
+  options: SearchListingsOptions = {}
 ): Promise<EbayListing[]> {
+  const { limit = 30, minPriceDollars, maxPriceDollars, sort } = options;
   const token = await getAccessToken();
 
   const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
   url.searchParams.set("q", query);
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("category_ids", CATEGORY_ID_BY_CARD_CATEGORY[category]);
-  url.searchParams.set("filter", "buyingOptions:{FIXED_PRICE}"); // Buy It Now only — comparable single-item prices, not live auctions mid-bid
+  if (sort && sort !== "bestMatch") url.searchParams.set("sort", sort);
+
+  // Buy It Now only — comparable single-item prices, not live auctions
+  // mid-bid. A price range (when given) is a comma-joined clause in the
+  // same `filter` param, not a separate query param.
+  const filterParts = ["buyingOptions:{FIXED_PRICE}"];
+  if (minPriceDollars != null || maxPriceDollars != null) {
+    filterParts.push(`price:[${minPriceDollars ?? ""}..${maxPriceDollars ?? ""}]`);
+    filterParts.push("priceCurrency:USD");
+  }
+  url.searchParams.set("filter", filterParts.join(","));
 
   const res = await fetch(url.toString(), {
     headers: {
@@ -108,15 +126,6 @@ export async function searchListings(
   return items.map(mapItemSummary);
 }
 
-/**
- * Browses a category's live listings with no keyword — the seed for
- * "discover deals without naming a card first". Sorted by price
- * descending and restricted to a $25-$1500 band: unrestricted-by-price
- * browsing (tried live first) surfaced almost entirely near-worthless
- * base commons (~$2-3) at the cheap end and joke/placeholder listings
- * (e.g. a "$99,999" troll listing) at the expensive end — this band is a
- * blunt but effective filter for "actually worth checking".
- */
 // "CCG Individual Cards" (183454) is not Pokemon-only — it's a shared
 // bucket across every non-sports card game (confirmed live: a keyword-
 // free browse came back full of Naruto, Dragon Ball, One Piece, and Weiss

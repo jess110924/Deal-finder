@@ -1,6 +1,7 @@
 import { findCard, type CardCategory, type CardReference } from "@/lib/sources/pricecharting";
 import { searchListings, findReferenceListing, type EbayListing } from "@/lib/sources/ebay";
 import { saveNewFinds, type ReferenceInfo, type SavedFind } from "@/lib/db";
+import { extractSearchKeywords, extractSerialDenominator } from "@/lib/cardKeywords";
 
 export type { CardCategory };
 
@@ -97,9 +98,39 @@ export async function searchUnderpricedCards(
   category: CardCategory,
   includeReferenceImage = false
 ): Promise<CardSearchResult> {
-  const [reference, rawListings] = await Promise.all([findCard(query, category), searchListings(query, category)]);
+  // Only rewrite the query when it carries a print-run denominator
+  // ("/150") — a strong, safe signal this is a pasted-in raw eBay title
+  // (reported directly: pasting a full eBay title into PriceCharting
+  // returns the wrong card) rather than a short deliberate search like
+  // "2018 Panini Prizm Luka Doncic". Rewriting the latter would risk
+  // dropping its year and matching the wrong season's card instead —
+  // gating on the serial number avoids that regression entirely, since a
+  // short deliberate query essentially never includes one.
+  const effectiveQuery = extractSerialDenominator(query) ? extractSearchKeywords(query) : query;
 
-  const ungradedListings = rawListings.filter((l) => !isGraded(l.condition) && !isBundle(l.title));
+  const [reference, rawListings] = await Promise.all([
+    findCard(effectiveQuery, category),
+    searchListings(effectiveQuery, category),
+  ]);
+
+  let ungradedListings = rawListings.filter((l) => !isGraded(l.condition) && !isBundle(l.title));
+
+  // Rewriting the query only helps when a subject can be confidently
+  // guessed (see extractSearchKeywords) — plenty of real titles start
+  // with the year instead of the player, where it can't, and the
+  // listings search then stays as loose as the raw title. Confirmed live
+  // this lets the wrong parallel through even after the fix above: a
+  // search for "...Cade Cunningham #88 Blue Refractor /150..." correctly
+  // matched the right PriceCharting product ($34.99) but still returned
+  // "Red White & Blue Refractor" listings (a different, much cheaper
+  // parallel) flagged as underpriced against it. Filtering the listings
+  // themselves by the serial number closes this regardless of whether
+  // the query rewrite above succeeded.
+  const querySerial = extractSerialDenominator(query);
+  if (querySerial) {
+    const withSerial = ungradedListings.filter((l) => l.title.includes(querySerial));
+    if (withSerial.length > 0) ungradedListings = withSerial;
+  }
 
   const referencePriceCents = reference?.ungradedPriceCents ?? null;
 
@@ -125,7 +156,7 @@ export async function searchUnderpricedCards(
     return a.priceDollars - b.priceDollars;
   });
 
-  const referenceInfo = reference ? await buildReferenceInfo(query, reference, includeReferenceImage) : null;
+  const referenceInfo = reference ? await buildReferenceInfo(effectiveQuery, reference, includeReferenceImage) : null;
 
   return {
     query,
