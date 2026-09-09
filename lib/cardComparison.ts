@@ -1,5 +1,6 @@
 import { findCard } from "@/lib/sources/pricecharting";
 import { searchListings, type EbayListing } from "@/lib/sources/ebay";
+import { saveNewFinds, type SavedFind } from "@/lib/db";
 
 // Graded slabs (PSA 10, BGS 9.5, etc.) sell for multiples of a raw card's
 // price. PriceCharting's reference here is ungraded-only, so comparing a
@@ -80,4 +81,29 @@ export async function searchUnderpricedCards(query: string): Promise<CardSearchR
       : null,
     listings,
   };
+}
+
+/**
+ * Runs a search for one watchlist card and saves any underpriced listings
+ * found. Shared by the scheduled check (check-watchlist route, every ~30
+ * min) and an immediate on-add check (watchlist route's POST) — without
+ * the latter, adding a card gives zero feedback until the next scheduled
+ * run, up to 30 minutes of "did this even work?" with nothing to look at.
+ */
+export async function checkCardAndSaveFinds(card: string): Promise<number> {
+  const result = await searchUnderpricedCards(card);
+  const candidates: SavedFind[] = result.listings
+    .filter((l) => l.isUnderpriced)
+    .map((l) => ({
+      itemId: l.itemId,
+      title: l.title,
+      priceDollars: l.priceDollars,
+      itemWebUrl: l.itemWebUrl,
+      imageUrl: l.imageUrl,
+      condition: l.condition,
+      percentBelowReference: l.percentBelowReference!,
+      searchedFor: card,
+      foundAt: new Date().toISOString(),
+    }));
+  return saveNewFinds(candidates);
 }

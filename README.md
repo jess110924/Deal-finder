@@ -60,10 +60,19 @@ assumed to work from documentation alone.
 ### Watchlist — automatic background checking
 
 Beyond the one-off manual search above, `/cards` also has a **watchlist**:
-add a card, and it gets checked automatically roughly every 30 minutes.
-Anything found underpriced gets saved to a review list that persists until
-you dismiss it — server-stored now (not just your browser), so it's the
-same list regardless of which device you check it from.
+add a card, and it gets checked automatically roughly every 30 minutes from
+then on. Anything found underpriced gets saved to a review list that
+persists until you dismiss it — server-stored now (not just your browser),
+so it's the same list regardless of which device you check it from.
+
+Adding a card also runs one check immediately (takes a few seconds — it's
+a real eBay + PriceCharting search, the "Add" button shows "Checking…"
+while it runs) rather than only registering the card and leaving you
+waiting up to 30 minutes with nothing to look at. If that immediate check
+happens to fail for some reason, the card still gets added to the
+watchlist regardless — it'll just pick up on the next scheduled run
+instead, and a message says as much rather than acting like the add
+itself failed.
 
 This needed two things the rest of the project doesn't use: an actual
 database, and a way to run checks on a schedule with nobody's browser

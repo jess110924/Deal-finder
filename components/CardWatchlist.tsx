@@ -8,6 +8,7 @@ export default function CardWatchlist() {
   const [finds, setFinds] = useState<SavedFind[]>([]);
   const [newCard, setNewCard] = useState("");
   const [loading, setLoading] = useState(true);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function loadAll() {
@@ -37,6 +38,7 @@ export default function CardWatchlist() {
     e.preventDefault();
     if (!newCard.trim()) return;
     setError(null);
+    setChecking(true);
     try {
       const res = await fetch("/api/cards/watchlist", {
         method: "POST",
@@ -46,9 +48,18 @@ export default function CardWatchlist() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
       setWatchlist(json.watchlist ?? []);
+      setFinds(json.finds ?? []);
       setNewCard("");
+      if (json.checkError) {
+        // Card was added fine; only the immediate check had trouble. It'll
+        // still get picked up by the next scheduled run, so this is a
+        // heads-up, not a failure of the add itself.
+        setError(`Added, but the immediate check failed: ${json.checkError}. It'll retry on the next scheduled run.`);
+      }
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setChecking(false);
     }
   }
 
@@ -117,12 +128,18 @@ export default function CardWatchlist() {
           />
           <button
             type="submit"
+            disabled={checking}
             className="rounded-md px-4 py-2 text-sm font-medium text-white"
             style={{ background: "var(--series-1)" }}
           >
-            Add
+            {checking ? "Checking…" : "Add"}
           </button>
         </form>
+        {checking && (
+          <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
+            Running an eBay + PriceCharting search now — this part takes a few seconds.
+          </p>
+        )}
         {!loading && watchlist.length === 0 && (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
             Nothing on the watchlist yet.

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWatchlist, saveNewFinds, type SavedFind } from "@/lib/db";
-import { searchUnderpricedCards } from "@/lib/cardComparison";
+import { getWatchlist } from "@/lib/db";
+import { checkCardAndSaveFinds } from "@/lib/cardComparison";
 
 /**
  * Triggered by a scheduled GitHub Actions workflow (see
@@ -22,21 +22,7 @@ export async function POST(request: NextRequest) {
 
   for (const card of watchlist) {
     try {
-      const result = await searchUnderpricedCards(card);
-      const candidates: SavedFind[] = result.listings
-        .filter((l) => l.isUnderpriced)
-        .map((l) => ({
-          itemId: l.itemId,
-          title: l.title,
-          priceDollars: l.priceDollars,
-          itemWebUrl: l.itemWebUrl,
-          imageUrl: l.imageUrl,
-          condition: l.condition,
-          percentBelowReference: l.percentBelowReference!,
-          searchedFor: card,
-          foundAt: new Date().toISOString(),
-        }));
-      const newCount = await saveNewFinds(candidates);
+      const newCount = await checkCardAndSaveFinds(card);
       results.push({ card, ok: true, newFinds: newCount });
     } catch (err) {
       results.push({ card, ok: false, error: (err as Error).message });
