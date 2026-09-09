@@ -3,7 +3,7 @@
 A fast-scanning deal aggregator: one feed, pulling from 9 sources, built for
 scanning quickly rather than passively waiting for Discord alerts. Dark
 theme, product thumbnails on every source. Also has a `/cards` page for
-finding underpriced sports card listings on eBay.
+finding underpriced sports card and Pokémon card listings on eBay.
 
 ## /cards — underpriced trading card finder
 
@@ -13,6 +13,13 @@ listing** against an **independent reference price** (PriceCharting).
 Search a card name; it looks up PriceCharting's ungraded market value and
 eBay's current Buy It Now listings for that search, then flags any listing
 priced 20%+ below the reference.
+
+Covers two categories, picked via a toggle on both the search box and the
+watchlist add form: **Sports** and **Pokémon**. Each uses a different
+PriceCharting domain and a different eBay category id under the hood (see
+the gotcha section below) — everything else (the 20%-below-reference
+threshold, graded/bundle filtering, the watchlist, saved finds) works
+identically for both.
 
 **Graded slabs (PSA/BGS/SGC/CGC) and multi-card lots are excluded from the
 comparison.** Graded cards sell for multiples of an ungraded reference
@@ -40,17 +47,23 @@ Application Keys → use the **Production** App ID and Cert ID (not Sandbox).
 ### An important gotcha this was built around: pricecharting.com vs sportscardspro.com
 
 The reference-price lookup (`lib/sources/pricecharting.ts`) queries
-**`sportscardspro.com`**, not `pricecharting.com` — same company, same
-account, same API key, same request/response format, but a domain scoped
-specifically to sports cards. This isn't a style choice: querying
-pricecharting.com's own domain for a sports card search returns almost
-entirely irrelevant results (Funko figures, unrelated products that happen
-to share a player's name — sometimes zero real matches in the first 100
-results for a very well-known card). Pokémon card search on
-pricecharting.com itself works fine; sports cards specifically don't,
-confirmed by testing identical queries against both domains with the same
-key side by side. If this project ever needs Pokémon card support too,
-that would go back to querying pricecharting.com instead.
+**`sportscardspro.com`** for the Sports category, not `pricecharting.com`
+— same company, same account, same API key, same request/response format,
+but a domain scoped specifically to sports cards. This isn't a style
+choice: querying pricecharting.com's own domain for a sports card search
+returns almost entirely irrelevant results (Funko figures, unrelated
+products that happen to share a player's name — sometimes zero real
+matches in the first 100 results for a very well-known card).
+`pricecharting.com` itself is used for the **Pokémon** category instead —
+confirmed live (a "1999 Base Set Charizard" query returns a real, sane
+$489 ungraded reference), since sportscardspro.com is sports-only and
+wouldn't return good Pokémon matches.
+
+The eBay side has an equivalent split: Sports searches use category id
+`212` ("Sports Trading Cards"); Pokémon searches use `183454` ("CCG
+Individual Cards") — confirmed by searching "charizard pokemon card" with
+no category filter and checking which categories real listings actually
+fall under.
 
 Both this and the eBay integration were verified against real accounts —
 the reference price search, the eBay listing search, and the

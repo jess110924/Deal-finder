@@ -1,6 +1,8 @@
-import { findCard } from "@/lib/sources/pricecharting";
+import { findCard, type CardCategory } from "@/lib/sources/pricecharting";
 import { searchListings, type EbayListing } from "@/lib/sources/ebay";
 import { saveNewFinds, type SavedFind } from "@/lib/db";
+
+export type { CardCategory };
 
 // Graded slabs (PSA 10, BGS 9.5, etc.) sell for multiples of a raw card's
 // price. PriceCharting's reference here is ungraded-only, so comparing a
@@ -39,14 +41,15 @@ export type CardListingResult = EbayListing & {
 
 export type CardSearchResult = {
   query: string;
+  category: CardCategory;
   reference: { productName: string; ungradedPriceDollars: number } | null;
   listings: CardListingResult[];
 };
 
 const UNDERPRICED_THRESHOLD_PERCENT = 20;
 
-export async function searchUnderpricedCards(query: string): Promise<CardSearchResult> {
-  const [reference, rawListings] = await Promise.all([findCard(query), searchListings(query)]);
+export async function searchUnderpricedCards(query: string, category: CardCategory): Promise<CardSearchResult> {
+  const [reference, rawListings] = await Promise.all([findCard(query, category), searchListings(query, category)]);
 
   const ungradedListings = rawListings.filter((l) => !isGraded(l.condition) && !isBundle(l.title));
 
@@ -76,6 +79,7 @@ export async function searchUnderpricedCards(query: string): Promise<CardSearchR
 
   return {
     query,
+    category,
     reference: reference
       ? { productName: reference.productName, ungradedPriceDollars: (reference.ungradedPriceCents ?? 0) / 100 }
       : null,
@@ -90,8 +94,8 @@ export async function searchUnderpricedCards(query: string): Promise<CardSearchR
  * the latter, adding a card gives zero feedback until the next scheduled
  * run, up to 30 minutes of "did this even work?" with nothing to look at.
  */
-export async function checkCardAndSaveFinds(card: string): Promise<number> {
-  const result = await searchUnderpricedCards(card);
+export async function checkCardAndSaveFinds(card: string, category: CardCategory): Promise<number> {
+  const result = await searchUnderpricedCards(card, category);
   const candidates: SavedFind[] = result.listings
     .filter((l) => l.isUnderpriced)
     .map((l) => ({
@@ -103,6 +107,7 @@ export async function checkCardAndSaveFinds(card: string): Promise<number> {
       condition: l.condition,
       percentBelowReference: l.percentBelowReference!,
       searchedFor: card,
+      category,
       foundAt: new Date().toISOString(),
     }));
   return saveNewFinds(candidates);

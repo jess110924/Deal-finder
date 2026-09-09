@@ -1,4 +1,5 @@
 import { Redis } from "@upstash/redis";
+import type { CardCategory } from "@/lib/sources/pricecharting";
 
 // Lazily constructed (not at module scope) so importing this file doesn't
 // eagerly instantiate a client — Redis.fromEnv() logs noisy warnings (and
@@ -28,21 +29,31 @@ const DISMISSED_KEY = "card-dismissed-ids";
 const MAX_FINDS = 200;
 const MAX_DISMISSED = 1000;
 
-export async function getWatchlist(): Promise<string[]> {
-  return (await getRedis().get<string[]>(WATCHLIST_KEY)) ?? [];
+export type WatchlistEntry = { name: string; category: CardCategory };
+
+// Raw stored value may still be string[] from before category support was
+// added — treated as "sports" (the only category that existed then) so
+// existing watchlists don't need a migration step.
+function normalizeEntry(raw: string | WatchlistEntry): WatchlistEntry {
+  return typeof raw === "string" ? { name: raw, category: "sports" } : raw;
 }
 
-export async function addToWatchlist(name: string): Promise<string[]> {
+export async function getWatchlist(): Promise<WatchlistEntry[]> {
+  const raw = (await getRedis().get<(string | WatchlistEntry)[]>(WATCHLIST_KEY)) ?? [];
+  return raw.map(normalizeEntry);
+}
+
+export async function addToWatchlist(name: string, category: CardCategory): Promise<WatchlistEntry[]> {
   const current = await getWatchlist();
-  if (current.some((c) => c.toLowerCase() === name.toLowerCase())) return current;
-  const next = [...current, name];
+  if (current.some((c) => c.category === category && c.name.toLowerCase() === name.toLowerCase())) return current;
+  const next = [...current, { name, category }];
   await getRedis().set(WATCHLIST_KEY, next);
   return next;
 }
 
-export async function removeFromWatchlist(name: string): Promise<string[]> {
+export async function removeFromWatchlist(name: string, category: CardCategory): Promise<WatchlistEntry[]> {
   const current = await getWatchlist();
-  const next = current.filter((c) => c.toLowerCase() !== name.toLowerCase());
+  const next = current.filter((c) => !(c.category === category && c.name.toLowerCase() === name.toLowerCase()));
   await getRedis().set(WATCHLIST_KEY, next);
   return next;
 }
@@ -56,6 +67,7 @@ export type SavedFind = {
   condition: string | null;
   percentBelowReference: number;
   searchedFor: string;
+  category: CardCategory;
   foundAt: string;
 };
 

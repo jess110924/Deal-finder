@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWatchlist, addToWatchlist, removeFromWatchlist, getFinds } from "@/lib/db";
-import { checkCardAndSaveFinds } from "@/lib/cardComparison";
+import { checkCardAndSaveFinds, type CardCategory } from "@/lib/cardComparison";
+
+function parseCategory(value: unknown): CardCategory {
+  return value === "pokemon" ? "pokemon" : "sports";
+}
 
 export async function GET() {
   try {
@@ -12,12 +16,13 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { name } = await request.json();
+    const { name, category } = await request.json();
     if (!name || typeof name !== "string") {
       return NextResponse.json({ error: "Missing 'name'." }, { status: 400 });
     }
+    const cat = parseCategory(category);
 
-    const watchlist = await addToWatchlist(name.trim());
+    const watchlist = await addToWatchlist(name.trim(), cat);
 
     // Immediate check on add — otherwise there's zero feedback until the
     // next scheduled run, up to 30 minutes away. This is a real eBay +
@@ -26,7 +31,7 @@ export async function POST(request: NextRequest) {
     // "wait up to 30 minutes with nothing to look at" by a lot.
     let checkError: string | null = null;
     try {
-      await checkCardAndSaveFinds(name.trim());
+      await checkCardAndSaveFinds(name.trim(), cat);
     } catch (err) {
       // Don't fail the whole add if the immediate check has trouble — the
       // card is still on the watchlist and will get picked up by the next
@@ -42,11 +47,11 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { name } = await request.json();
+    const { name, category } = await request.json();
     if (!name || typeof name !== "string") {
       return NextResponse.json({ error: "Missing 'name'." }, { status: 400 });
     }
-    return NextResponse.json({ watchlist: await removeFromWatchlist(name.trim()) });
+    return NextResponse.json({ watchlist: await removeFromWatchlist(name.trim(), parseCategory(category)) });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

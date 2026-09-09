@@ -55,13 +55,26 @@ export type EbayListing = {
   condition: string | null;
 };
 
-export async function searchListings(query: string, limit = 30): Promise<EbayListing[]> {
+// Confirmed live by searching "charizard pokemon card" with no category
+// filter and inspecting what categories real listings actually fall
+// under — single Pokemon (and other CCG) cards land in "CCG Individual
+// Cards", a sibling of "Sports Trading Cards", not a child of it.
+const CATEGORY_ID_BY_CARD_CATEGORY = {
+  sports: "212", // "Sports Trading Cards"
+  pokemon: "183454", // "CCG Individual Cards"
+} as const;
+
+export async function searchListings(
+  query: string,
+  category: keyof typeof CATEGORY_ID_BY_CARD_CATEGORY,
+  limit = 30
+): Promise<EbayListing[]> {
   const token = await getAccessToken();
 
   const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
   url.searchParams.set("q", query);
   url.searchParams.set("limit", String(limit));
-  url.searchParams.set("category_ids", "212"); // "Sports Trading Cards" top-level category
+  url.searchParams.set("category_ids", CATEGORY_ID_BY_CARD_CATEGORY[category]);
   url.searchParams.set("filter", "buyingOptions:{FIXED_PRICE}"); // Buy It Now only — comparable single-item prices, not live auctions mid-bid
 
   const res = await fetch(url.toString(), {

@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { SavedFind } from "@/lib/db";
+import type { SavedFind, WatchlistEntry } from "@/lib/db";
+import type { CardCategory } from "@/lib/cardComparison";
+
+const CATEGORY_LABEL: Record<CardCategory, string> = { sports: "Sports", pokemon: "Pokémon" };
 
 export default function CardWatchlist() {
-  const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
   const [finds, setFinds] = useState<SavedFind[]>([]);
+  const [category, setCategory] = useState<CardCategory>("sports");
   const [newCard, setNewCard] = useState("");
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
@@ -47,7 +51,7 @@ export default function CardWatchlist() {
       const res = await fetch("/api/cards/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newCard.trim() }),
+        body: JSON.stringify({ name: newCard.trim(), category }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
@@ -85,7 +89,7 @@ export default function CardWatchlist() {
       const res = await fetch("/api/cards/watchlist/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ names }),
+        body: JSON.stringify({ names, category }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
@@ -99,13 +103,13 @@ export default function CardWatchlist() {
     }
   }
 
-  async function removeCard(name: string) {
+  async function removeCard(name: string, cardCategory: CardCategory) {
     setError(null);
     try {
       const res = await fetch("/api/cards/watchlist", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, category: cardCategory }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
@@ -153,12 +157,29 @@ export default function CardWatchlist() {
           Cards here get checked automatically every ~30 minutes. Underpriced listings found show up below,
           and stay there until you dismiss them.
         </p>
+        <div className="flex gap-1 mb-3">
+          {(["sports", "pokemon"] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCategory(c)}
+              className="rounded-md px-3 py-1.5 text-sm font-medium"
+              style={
+                category === c
+                  ? { background: "var(--series-1)", color: "#fff" }
+                  : { background: "var(--surface-1)", color: "var(--text-secondary)", border: "1px solid var(--border-hairline)" }
+              }
+            >
+              {CATEGORY_LABEL[c]}
+            </button>
+          ))}
+        </div>
         <form onSubmit={addCard} className="flex gap-2 mb-3">
           <input
             type="text"
             value={newCard}
             onChange={(e) => setNewCard(e.target.value)}
-            placeholder="e.g. 2018 Panini Prizm Luka Doncic"
+            placeholder={category === "sports" ? "e.g. 2018 Panini Prizm Luka Doncic" : "e.g. 1999 Base Set Charizard"}
             className="flex-1 rounded-md px-3 py-2 text-sm"
             style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
           />
@@ -197,8 +218,8 @@ export default function CardWatchlist() {
               style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
             />
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              These skip the instant check (too many to search all at once) and get picked up on the next
-              scheduled run, within ~30 minutes.
+              Adds all as {CATEGORY_LABEL[category]}. These skip the instant check (too many to search all
+              at once) and get picked up on the next scheduled run, within ~30 minutes.
             </p>
             <button
               type="submit"
@@ -222,16 +243,19 @@ export default function CardWatchlist() {
           </p>
         )}
         <div className="flex flex-wrap gap-2">
-          {watchlist.map((name) => (
+          {watchlist.map((entry) => (
             <span
-              key={name}
+              key={`${entry.category}:${entry.name}`}
               className="rounded-full pl-3 pr-1.5 py-1 text-sm flex items-center gap-2"
               style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)", color: "var(--text-primary)" }}
             >
-              {name}
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                {CATEGORY_LABEL[entry.category]}
+              </span>
+              {entry.name}
               <button
-                onClick={() => removeCard(name)}
-                aria-label={`Remove ${name}`}
+                onClick={() => removeCard(entry.name, entry.category)}
+                aria-label={`Remove ${entry.name}`}
                 className="rounded-full w-5 h-5 flex items-center justify-center text-xs"
                 style={{ color: "var(--text-muted)" }}
               >
@@ -273,7 +297,7 @@ export default function CardWatchlist() {
                   {find.title}
                 </a>
                 <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  Watchlist: {find.searchedFor}
+                  {find.category && `${CATEGORY_LABEL[find.category]} · `}Watchlist: {find.searchedFor}
                 </div>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">

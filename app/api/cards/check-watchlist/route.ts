@@ -20,12 +20,12 @@ export async function POST(request: NextRequest) {
   const watchlist = await getWatchlist();
   const results: { card: string; ok: boolean; newFinds?: number; error?: string }[] = [];
 
-  for (const card of watchlist) {
+  for (const entry of watchlist) {
     try {
-      const newCount = await checkCardAndSaveFinds(card);
-      results.push({ card, ok: true, newFinds: newCount });
+      const newCount = await checkCardAndSaveFinds(entry.name, entry.category);
+      results.push({ card: entry.name, ok: true, newFinds: newCount });
     } catch (err) {
-      results.push({ card, ok: false, error: (err as Error).message });
+      results.push({ card: entry.name, ok: false, error: (err as Error).message });
     }
   }
 

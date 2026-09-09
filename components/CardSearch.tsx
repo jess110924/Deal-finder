@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { CardSearchResult } from "@/lib/cardComparison";
+import type { CardCategory, CardSearchResult } from "@/lib/cardComparison";
 
 export default function CardSearch() {
+  const [category, setCategory] = useState<CardCategory>("sports");
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<CardSearchResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -17,7 +18,9 @@ export default function CardSearch() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch(`/api/cards/search?q=${encodeURIComponent(query.trim())}`);
+      const res = await fetch(
+        `/api/cards/search?q=${encodeURIComponent(query.trim())}&category=${category}`
+      );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
       setResult(json);
@@ -41,12 +44,30 @@ export default function CardSearch() {
         </p>
       </div>
 
+      <div className="flex gap-1">
+        {(["sports", "pokemon"] as const).map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setCategory(c)}
+            className="rounded-md px-3 py-1.5 text-sm font-medium"
+            style={
+              category === c
+                ? { background: "var(--series-1)", color: "#fff" }
+                : { background: "var(--surface-1)", color: "var(--text-secondary)", border: "1px solid var(--border-hairline)" }
+            }
+          >
+            {c === "sports" ? "Sports" : "Pokémon"}
+          </button>
+        ))}
+      </div>
+
       <form onSubmit={handleSearch} className="flex gap-2">
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="e.g. 2018 Panini Prizm Luka Doncic"
+          placeholder={category === "sports" ? "e.g. 2018 Panini Prizm Luka Doncic" : "e.g. 1999 Base Set Charizard"}
           className="flex-1 rounded-md px-3 py-2 text-sm"
           style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
         />
