@@ -106,3 +106,41 @@ export async function searchListings(
     };
   });
 }
+
+export type ReferenceListing = { imageUrl: string; itemWebUrl: string };
+
+/**
+ * Finds one real, currently-listed eBay item matching a PriceCharting
+ * product's `epid` (eBay catalog product id) — used to show an actual
+ * photo of the exact reference card being compared against, so it's
+ * obvious at a glance whether it's really the same card. eBay's Catalog
+ * API (which would resolve an epid directly to a product photo without
+ * needing a live listing) requires a permission scope this app's key
+ * doesn't have (confirmed live: 403 "Insufficient permissions"); filtering
+ * a normal Browse API search by epid works with the same basic scope
+ * already used elsewhere and returns the exact matching product — verified
+ * live against the Luka Doncic Prizm card, whose epid it returned exactly.
+ */
+export async function findReferenceListing(query: string, epid: string): Promise<ReferenceListing | null> {
+  const token = await getAccessToken();
+
+  const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("filter", `epid:{${epid}}`);
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
+    next: { revalidate: 3600 }, // this is just an illustrative photo, not a price — cache like the reference price itself
+  });
+  if (!res.ok) {
+    throw new Error(`eBay epid lookup failed: ${res.status} ${res.statusText}`);
+  }
+
+  const json = await res.json();
+  const item = (json?.itemSummaries ?? [])[0] as Record<string, unknown> | undefined;
+  if (!item) return null;
+  const image = item.image as { imageUrl?: string } | undefined;
+  if (!image?.imageUrl || !item.itemWebUrl) return null;
+  return { imageUrl: image.imageUrl, itemWebUrl: String(item.itemWebUrl) };
+}

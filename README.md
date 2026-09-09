@@ -70,6 +70,33 @@ the reference price search, the eBay listing search, and the
 graded/bundle filtering were each checked against actual results, not
 assumed to work from documentation alone.
 
+### Verifying the reference is actually the right card
+
+The manual search page (not the watchlist — see below for why) shows a
+photo and a direct eBay link for the PriceCharting reference product
+itself, so it's obvious at a glance whether the price being compared
+against is really for the card that was searched for.
+
+PriceCharting's API doesn't return a photo directly, but newer/more
+searched-for products come back with an `epid` — an eBay catalog product
+id. eBay's Catalog API would resolve that directly to a product photo,
+but it needs a permission scope this app's key doesn't have (confirmed
+live: 403 "Insufficient permissions"). Filtering a normal Browse API
+search by that same epid works with the same basic scope already used
+everywhere else, and returns the exact matching product — confirmed live
+against the Luka Doncic Prizm card, whose epid it returned back exactly.
+
+Not every product has an epid (confirmed absent on some older ones, e.g.
+1999 Base Set Charizard) — when it's missing, there's no photo, but a
+plain "search eBay for this exact product name" link is always shown
+instead, so there's always something to click through and double-check
+by hand.
+
+This only runs on the manual search (`includeReferenceImage` in
+`lib/cardComparison.ts`), not on watchlist checks — those run every ~30
+minutes per watchlist card and don't render the reference at all, so
+fetching an illustrative photo there would just be wasted eBay API calls.
+
 ### Watchlist — automatic background checking
 
 Beyond the one-off manual search above, `/cards` also has a **watchlist**:

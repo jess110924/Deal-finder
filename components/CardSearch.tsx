@@ -94,15 +94,37 @@ export default function CardSearch() {
             style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
           >
             {result.reference ? (
-              <>
-                <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                  PriceCharting reference (ungraded)
+              <div className="flex gap-3 items-center">
+                {result.reference.imageUrl && (
+                  <a href={result.reference.itemWebUrl ?? result.reference.ebaySearchUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={result.reference.imageUrl}
+                      alt=""
+                      className="w-16 h-16 rounded-md object-contain"
+                      style={{ background: "#fff", border: "1px solid var(--border-hairline)" }}
+                    />
+                  </a>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm" style={{ color: "var(--text-muted)" }}>
+                    PriceCharting reference (ungraded)
+                  </div>
+                  <div className="font-medium" style={{ color: "var(--text-primary)" }}>{result.reference.productName}</div>
+                  <div className="text-xl font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
+                    ${result.reference.ungradedPriceDollars.toFixed(2)}
+                  </div>
+                  <a
+                    href={result.reference.itemWebUrl ?? result.reference.ebaySearchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs"
+                    style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                  >
+                    {result.reference.itemWebUrl ? "View this card on eBay" : "Search eBay to double-check this is the right card"}
+                  </a>
                 </div>
-                <div className="font-medium" style={{ color: "var(--text-primary)" }}>{result.reference.productName}</div>
-                <div className="text-xl font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
-                  ${result.reference.ungradedPriceDollars.toFixed(2)}
-                </div>
-              </>
+              </div>
             ) : (
               <p style={{ color: "var(--text-muted)" }}>No PriceCharting reference found for this search — showing eBay listings without a comparison.</p>
             )}

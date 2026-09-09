@@ -1,5 +1,5 @@
 import { findCard, type CardCategory } from "@/lib/sources/pricecharting";
-import { searchListings, type EbayListing } from "@/lib/sources/ebay";
+import { searchListings, findReferenceListing, type EbayListing } from "@/lib/sources/ebay";
 import { saveNewFinds, type SavedFind } from "@/lib/db";
 
 export type { CardCategory };
@@ -39,16 +39,44 @@ export type CardListingResult = EbayListing & {
   isUnderpriced: boolean;
 };
 
+export type CardReferenceInfo = {
+  productName: string;
+  ungradedPriceDollars: number;
+  // A real photo + link for this exact card, so it's obvious at a glance
+  // whether the reference being compared against is actually the right
+  // card. Only populated when asked for (see `includeReferenceImage`
+  // below) and only when PriceCharting linked an eBay catalog id for this
+  // product — not every product has one (confirmed: newer/more-searched
+  // cards tend to, older ones sometimes don't).
+  imageUrl: string | null;
+  itemWebUrl: string | null;
+  // Always present regardless of the above — a plain eBay search for the
+  // product name, so there's always something to click through to and
+  // visually double-check even when no catalog-matched photo was found.
+  ebaySearchUrl: string;
+};
+
 export type CardSearchResult = {
   query: string;
   category: CardCategory;
-  reference: { productName: string; ungradedPriceDollars: number } | null;
+  reference: CardReferenceInfo | null;
   listings: CardListingResult[];
 };
 
 const UNDERPRICED_THRESHOLD_PERCENT = 20;
 
-export async function searchUnderpricedCards(query: string, category: CardCategory): Promise<CardSearchResult> {
+/**
+ * `includeReferenceImage` costs one extra eBay API call and is only
+ * useful when a human is looking at the reference (the manual search
+ * page) — the watchlist's automatic checks (checkCardAndSaveFinds below)
+ * call this too, every ~30 minutes per watchlist card, and don't render
+ * the reference at all, so it's off by default to not waste quota there.
+ */
+export async function searchUnderpricedCards(
+  query: string,
+  category: CardCategory,
+  includeReferenceImage = false
+): Promise<CardSearchResult> {
   const [reference, rawListings] = await Promise.all([findCard(query, category), searchListings(query, category)]);
 
   const ungradedListings = rawListings.filter((l) => !isGraded(l.condition) && !isBundle(l.title));
@@ -77,12 +105,34 @@ export async function searchUnderpricedCards(query: string, category: CardCatego
     return a.priceDollars - b.priceDollars;
   });
 
+  let referenceInfo: CardReferenceInfo | null = null;
+  if (reference) {
+    let imageUrl: string | null = null;
+    let itemWebUrl: string | null = null;
+    if (includeReferenceImage && reference.epid) {
+      try {
+        const found = await findReferenceListing(query, reference.epid);
+        imageUrl = found?.imageUrl ?? null;
+        itemWebUrl = found?.itemWebUrl ?? null;
+      } catch {
+        // A missing illustrative photo isn't worth failing the whole
+        // search over — the always-present ebaySearchUrl below still
+        // gives the user a way to double-check the reference by hand.
+      }
+    }
+    referenceInfo = {
+      productName: reference.productName,
+      ungradedPriceDollars: (reference.ungradedPriceCents ?? 0) / 100,
+      imageUrl,
+      itemWebUrl,
+      ebaySearchUrl: `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(reference.productName + " " + reference.consoleName)}`,
+    };
+  }
+
   return {
     query,
     category,
-    reference: reference
-      ? { productName: reference.productName, ungradedPriceDollars: (reference.ungradedPriceCents ?? 0) / 100 }
-      : null,
+    reference: referenceInfo,
     listings,
   };
 }

@@ -19,6 +19,13 @@ export type CardReference = {
   productName: string;
   consoleName: string;
   ungradedPriceCents: number | null;
+  // eBay's catalog product id for this exact card, when PriceCharting has
+  // it linked — lets us pull a real photo of this specific product via
+  // eBay's Browse API (see lib/sources/ebay.ts's findReferenceListing).
+  // Confirmed present on newer/more-searched cards (e.g. 2018 Prizm Luka
+  // Doncic); confirmed absent on some older ones (e.g. 1999 Base Set
+  // Charizard) — always optional, never assume it's there.
+  epid: string | null;
 };
 
 function mapProduct(json: Record<string, unknown>): CardReference {
@@ -30,6 +37,7 @@ function mapProduct(json: Record<string, unknown>): CardReference {
     productName: String(json["product-name"] ?? ""),
     consoleName: String(json["console-name"] ?? ""),
     ungradedPriceCents: cents(json["loose-price"]),
+    epid: json.epid ? String(json.epid) : null,
   };
 }
 
