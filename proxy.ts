@@ -11,6 +11,14 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Called by a scheduled GitHub Actions workflow, not a browser — it has
+  // no session cookie to present, so it's excluded from the cookie gate
+  // here and instead checks its own bearer-style secret independently
+  // (see app/api/cards/check-watchlist/route.ts).
+  if (request.nextUrl.pathname === "/api/cards/check-watchlist") {
+    return NextResponse.next();
+  }
+
   // If no password is configured (e.g. local dev), don't lock the owner out.
   if (!process.env.SITE_PASSWORD) {
     return NextResponse.next();

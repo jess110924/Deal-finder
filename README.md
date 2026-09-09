@@ -57,11 +57,58 @@ the reference price search, the eBay listing search, and the
 graded/bundle filtering were each checked against actual results, not
 assumed to work from documentation alone.
 
+### Watchlist — automatic background checking
+
+Beyond the one-off manual search above, `/cards` also has a **watchlist**:
+add a card, and it gets checked automatically roughly every 30 minutes.
+Anything found underpriced gets saved to a review list that persists until
+you dismiss it — server-stored now (not just your browser), so it's the
+same list regardless of which device you check it from.
+
+This needed two things the rest of the project doesn't use: an actual
+database, and a way to run checks on a schedule with nobody's browser
+open.
+
+**Database**: [Upstash Redis](https://vercel.com/marketplace/upstash) via
+Vercel's Storage tab (free tier: 256MB, 30K commands/day — far more than
+this needs). Connecting it auto-injects `KV_REST_API_URL` /
+`KV_REST_API_TOKEN`, which `lib/db.ts` reads automatically — no manual
+key-copying for this one.
+
+**Scheduling**: Vercel's own Cron Jobs cap out at once per day on the free
+Hobby plan (any more frequent schedule fails at deploy time) — too coarse
+for catching a listing before someone else buys it. Instead,
+`.github/workflows/check-watchlist.yml` runs on a GitHub Actions schedule
+every 30 minutes (no such cap there, and it's free) and calls
+`POST /api/cards/check-watchlist` on the deployed site. That endpoint sits
+outside the site's normal cookie-based login (see `proxy.ts`) since a
+script has no browser session to present — it checks its own secret
+instead.
+
+#### Setup
+
+1. In Vercel: **Storage** tab → **Create Database** → **Upstash** → **Redis**
+   → free tier → **Connect** to this project. This injects the two
+   `KV_REST_API_URL`/`KV_REST_API_TOKEN` variables automatically.
+2. Pick a random secret value and add it as `CRON_SECRET` in **both**:
+   - Vercel's environment variables (so the endpoint recognizes it)
+   - This GitHub repo's **Settings → Secrets and variables → Actions** (so
+     the workflow can send it) — same value in both places
+3. Also add a second GitHub Actions secret, `DEAL_FINDER_URL`, set to your
+   deployed site's URL (e.g. `https://deal-finder-yourname.vercel.app`,
+   **no trailing slash**)
+4. Redeploy (any push does this, or trigger one manually)
+5. To test without waiting up to 30 minutes: on GitHub, go to **Actions**
+   tab → "Check card watchlist" workflow → **Run workflow** button
+   (works because of the `workflow_dispatch` trigger in the yml file)
+
 ## Stack
 
 - Next.js 16 (App Router) + TypeScript + Tailwind
-- No database — sources are fetched live on each request; "dismissed" state
-  lives in the browser's `localStorage` (per-device, not shared/synced)
+- Upstash Redis (via Vercel's Marketplace) for the card watchlist and saved
+  finds — everything else has no database and is fetched live per request;
+  the main deal feed's "dismissed" state lives in the browser's
+  `localStorage` (per-device, not shared/synced) rather than here
 - Dark theme only (no light mode / system-preference toggle) — this is a
   personal tool, not a public product, so committing to one look kept
   things simple
@@ -225,3 +272,10 @@ site is wide open without it.
 - `lib/sources/cheapshark.ts`, `epic.ts` — free-game APIs
 - `lib/sources/keepa.ts` — Amazon price-drop search (needs your API key)
 - `lib/auth.ts`, `proxy.ts`, `app/login/` — the password gate
+- `app/cards/page.tsx`, `components/CardSearch.tsx` — manual card search
+- `lib/cardComparison.ts` — eBay-vs-PriceCharting comparison + filtering
+- `lib/sources/pricecharting.ts`, `ebay.ts` — the two card data sources
+- `lib/db.ts` — Upstash Redis: watchlist, saved finds, dismissed-ids
+- `components/CardWatchlist.tsx` — watchlist manager + saved-finds review UI
+- `app/api/cards/check-watchlist/route.ts` — the scheduled check endpoint
+- `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action

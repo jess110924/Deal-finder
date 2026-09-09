@@ -1,0 +1,26 @@
+name: Check card watchlist
+
+# Runs every 30 minutes. GitHub Actions doesn't guarantee exact timing under
+# load (a few minutes of drift is normal), but has no once-a-day cap the
+# way Vercel's free Hobby-tier cron does — that restriction is what this
+# workflow exists to route around, at no extra cost.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call check-watchlist endpoint
+        run: |
+          response=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST "${{ secrets.DEAL_FINDER_URL }}/api/cards/check-watchlist" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}")
+          echo "HTTP status: $response"
+          cat /tmp/response.json
+          if [ "$response" -ge 400 ]; then
+            echo "Request failed"
+            exit 1
+          fi
