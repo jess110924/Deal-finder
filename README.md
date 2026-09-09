@@ -2,7 +2,60 @@
 
 A fast-scanning deal aggregator: one feed, pulling from 9 sources, built for
 scanning quickly rather than passively waiting for Discord alerts. Dark
-theme, product thumbnails on every source.
+theme, product thumbnails on every source. Also has a `/cards` page for
+finding underpriced sports card listings on eBay.
+
+## /cards — underpriced trading card finder
+
+Different shape from the main deal feed: instead of comparing a price
+against its own history (like Keepa does), this compares a **live eBay
+listing** against an **independent reference price** (PriceCharting).
+Search a card name; it looks up PriceCharting's ungraded market value and
+eBay's current Buy It Now listings for that search, then flags any listing
+priced 20%+ below the reference.
+
+**Graded slabs (PSA/BGS/SGC/CGC) and multi-card lots are excluded from the
+comparison.** Graded cards sell for multiples of an ungraded reference
+price, so comparing them would produce false "amazing deal" signals rather
+than real ones; a lot of several cards for one price isn't comparable to a
+single-card reference at all. Grading is detected via eBay's own
+`condition` field (confirmed reliable: literally "Graded" vs "Ungraded"),
+not a title guess — an earlier title-regex version of this filter missed
+titles like "PSA Graded Mint 9" (words between "PSA" and the grade number)
+and let real graded slabs slip through undetected.
+
+### Setup
+
+Needs two things in `.env`:
+
+```
+PRICECHARTING_API_KEY=your-existing-key
+EBAY_CLIENT_ID=...
+EBAY_CLIENT_SECRET=...
+```
+
+Get the eBay credentials free at [developer.ebay.com](https://developer.ebay.com) →
+Application Keys → use the **Production** App ID and Cert ID (not Sandbox).
+
+### An important gotcha this was built around: pricecharting.com vs sportscardspro.com
+
+The reference-price lookup (`lib/sources/pricecharting.ts`) queries
+**`sportscardspro.com`**, not `pricecharting.com` — same company, same
+account, same API key, same request/response format, but a domain scoped
+specifically to sports cards. This isn't a style choice: querying
+pricecharting.com's own domain for a sports card search returns almost
+entirely irrelevant results (Funko figures, unrelated products that happen
+to share a player's name — sometimes zero real matches in the first 100
+results for a very well-known card). Pokémon card search on
+pricecharting.com itself works fine; sports cards specifically don't,
+confirmed by testing identical queries against both domains with the same
+key side by side. If this project ever needs Pokémon card support too,
+that would go back to querying pricecharting.com instead.
+
+Both this and the eBay integration were verified against real accounts —
+the reference price search, the eBay listing search, and the
+graded/bundle filtering were each checked against actual results, not
+assumed to work from documentation alone.
 
 ## Stack
 
