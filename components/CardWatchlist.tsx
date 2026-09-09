@@ -10,6 +10,10 @@ export default function CardWatchlist() {
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showBulkAdd, setShowBulkAdd] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkAdding, setBulkAdding] = useState(false);
+  const [bulkAddedCount, setBulkAddedCount] = useState<number | null>(null);
 
   async function loadAll() {
     setLoading(true);
@@ -60,6 +64,38 @@ export default function CardWatchlist() {
       setError((err as Error).message);
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function bulkAdd(e: React.FormEvent) {
+    e.preventDefault();
+    const names = Array.from(
+      new Set(
+        bulkText
+          .split(/[\n,]/)
+          .map((n) => n.trim())
+          .filter(Boolean)
+      )
+    );
+    if (names.length === 0) return;
+    setError(null);
+    setBulkAdding(true);
+    setBulkAddedCount(null);
+    try {
+      const res = await fetch("/api/cards/watchlist/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ names }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
+      setWatchlist(json.watchlist ?? []);
+      setBulkText("");
+      setBulkAddedCount(names.length);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBulkAdding(false);
     }
   }
 
@@ -140,6 +176,46 @@ export default function CardWatchlist() {
             Running an eBay + PriceCharting search now — this part takes a few seconds.
           </p>
         )}
+
+        <button
+          type="button"
+          onClick={() => setShowBulkAdd((v) => !v)}
+          className="text-xs mb-3"
+          style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+        >
+          {showBulkAdd ? "Hide bulk add" : "Add multiple cards at once"}
+        </button>
+
+        {showBulkAdd && (
+          <form onSubmit={bulkAdd} className="mb-4 flex flex-col gap-2">
+            <textarea
+              value={bulkText}
+              onChange={(e) => setBulkText(e.target.value)}
+              placeholder={"One card per line (or comma-separated), e.g.\n2023 Panini Prizm Victor Wembanyama\n2018 Panini Prizm Luka Doncic\nPanini Prizm Nikola Jokic"}
+              rows={5}
+              className="rounded-md px-3 py-2 text-sm"
+              style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
+            />
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+              These skip the instant check (too many to search all at once) and get picked up on the next
+              scheduled run, within ~30 minutes.
+            </p>
+            <button
+              type="submit"
+              disabled={bulkAdding || !bulkText.trim()}
+              className="self-start rounded-md px-4 py-2 text-sm font-medium text-white"
+              style={{ background: "var(--series-1)" }}
+            >
+              {bulkAdding ? "Adding…" : "Add all"}
+            </button>
+            {bulkAddedCount !== null && (
+              <p className="text-xs" style={{ color: "var(--good)" }}>
+                Added {bulkAddedCount} card{bulkAddedCount === 1 ? "" : "s"} to the watchlist.
+              </p>
+            )}
+          </form>
+        )}
+
         {!loading && watchlist.length === 0 && (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
             Nothing on the watchlist yet.

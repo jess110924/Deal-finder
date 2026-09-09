@@ -74,6 +74,14 @@ watchlist regardless — it'll just pick up on the next scheduled run
 instead, and a message says as much rather than acting like the add
 itself failed.
 
+There's also a **bulk add** option ("Add multiple cards at once" link
+under the search box) for seeding the watchlist with many cards in one
+shot instead of typing them one at a time — paste one card per line (or
+comma-separated). Bulk-added cards skip the immediate check (running a
+real search for 15-20+ cards sequentially would risk timing out) and
+just get picked up on the next scheduled run, same as any other add that
+happens to miss its instant check.
+
 This needed two things the rest of the project doesn't use: an actual
 database, and a way to run checks on a schedule with nobody's browser
 open.
@@ -286,5 +294,6 @@ site is wide open without it.
 - `lib/sources/pricecharting.ts`, `ebay.ts` — the two card data sources
 - `lib/db.ts` — Upstash Redis: watchlist, saved finds, dismissed-ids
 - `components/CardWatchlist.tsx` — watchlist manager + saved-finds review UI
+- `app/api/cards/watchlist/bulk/route.ts` — bulk-add endpoint (no immediate check)
 - `app/api/cards/check-watchlist/route.ts` — the scheduled check endpoint
 - `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action
