@@ -1,0 +1,29 @@
+name: Discover card deals
+
+# Hourly, not every 30 minutes like check-watchlist — each run makes one
+# PriceCharting lookup per browsed listing (~25 per category, 2 categories),
+# so it burns through PriceCharting's request budget noticeably faster than
+# the watchlist check does. Tune the cadence here and the batch size
+# (the `limit` argument to discoverDeals in lib/cardDiscovery.ts) together
+# if PriceCharting's plan allows more — or less, if this turns out to be
+# too much.
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call discover endpoint
+        run: |
+          response=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST "${{ secrets.DEAL_FINDER_URL }}/api/cards/discover" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}")
+          echo "HTTP status: $response"
+          cat /tmp/response.json
+          if [ "$response" -ge 400 ]; then
+            echo "Request failed"
+            exit 1
+          fi

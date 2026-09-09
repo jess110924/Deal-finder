@@ -58,6 +58,14 @@ export async function removeFromWatchlist(name: string, category: CardCategory):
   return next;
 }
 
+export type ReferenceInfo = {
+  productName: string;
+  ungradedPriceDollars: number;
+  imageUrl: string | null;
+  itemWebUrl: string | null;
+  ebaySearchUrl: string;
+};
+
 export type SavedFind = {
   itemId: string;
   title: string;
@@ -68,6 +76,17 @@ export type SavedFind = {
   percentBelowReference: number;
   searchedFor: string;
   category: CardCategory;
+  // "watchlist" = a card you explicitly added; "discovery" = surfaced
+  // automatically by browsing eBay's live listings and checking each one
+  // against PriceCharting, with no name given by you first. Discovery
+  // matches are inherently noisier (a real search query vs. a freeform
+  // eBay title), so double-check `reference` before trusting one.
+  // Optional/absent on finds saved before this field existed — treat
+  // missing as "watchlist" (the only source that existed then).
+  source?: "watchlist" | "discovery";
+  // What this find's price was actually compared against. Optional for
+  // the same backward-compatibility reason as `source`.
+  reference?: ReferenceInfo;
   foundAt: string;
 };
 

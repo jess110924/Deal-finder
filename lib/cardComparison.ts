@@ -1,6 +1,6 @@
-import { findCard, type CardCategory } from "@/lib/sources/pricecharting";
+import { findCard, type CardCategory, type CardReference } from "@/lib/sources/pricecharting";
 import { searchListings, findReferenceListing, type EbayListing } from "@/lib/sources/ebay";
-import { saveNewFinds, type SavedFind } from "@/lib/db";
+import { saveNewFinds, type ReferenceInfo, type SavedFind } from "@/lib/db";
 
 export type { CardCategory };
 
@@ -16,7 +16,7 @@ export type { CardCategory };
 // which missed titles like "PSA Graded Mint 9" (words in between) and let
 // graded slabs slip through undetected. The structured condition field
 // doesn't have that failure mode.
-function isGraded(condition: string | null): boolean {
+export function isGraded(condition: string | null): boolean {
   return (condition ?? "").toLowerCase().includes("graded") && !(condition ?? "").toLowerCase().includes("ungraded");
 }
 
@@ -29,7 +29,7 @@ function isGraded(condition: string | null): boolean {
 // filter didn't (and shouldn't have) caught it.
 const LOT_PATTERN = /\b(lot of|lot\/|\(\d+\)|\d+[- ]card lot|bundle)\b/i;
 
-function isBundle(title: string): boolean {
+export function isBundle(title: string): boolean {
   return LOT_PATTERN.test(title);
 }
 
@@ -39,38 +39,58 @@ export type CardListingResult = EbayListing & {
   isUnderpriced: boolean;
 };
 
-export type CardReferenceInfo = {
-  productName: string;
-  ungradedPriceDollars: number;
-  // A real photo + link for this exact card, so it's obvious at a glance
-  // whether the reference being compared against is actually the right
-  // card. Only populated when asked for (see `includeReferenceImage`
-  // below) and only when PriceCharting linked an eBay catalog id for this
-  // product — not every product has one (confirmed: newer/more-searched
-  // cards tend to, older ones sometimes don't).
-  imageUrl: string | null;
-  itemWebUrl: string | null;
-  // Always present regardless of the above — a plain eBay search for the
-  // product name, so there's always something to click through to and
-  // visually double-check even when no catalog-matched photo was found.
-  ebaySearchUrl: string;
-};
-
 export type CardSearchResult = {
   query: string;
   category: CardCategory;
-  reference: CardReferenceInfo | null;
+  reference: ReferenceInfo | null;
   listings: CardListingResult[];
 };
 
-const UNDERPRICED_THRESHOLD_PERCENT = 20;
+export const UNDERPRICED_THRESHOLD_PERCENT = 20;
+
+/**
+ * A real photo + link for this exact card, so it's obvious at a glance
+ * whether whatever's being compared against is actually the right card.
+ * The photo/link only exist when PriceCharting linked an eBay catalog id
+ * (epid) for this product — not every product has one (confirmed: newer/
+ * more-searched cards tend to, older ones sometimes don't) — but
+ * `ebaySearchUrl` is always populated regardless, so there's always
+ * something to click through and double-check by hand. `query` should be
+ * the search text that found this reference (not necessarily the
+ * product's own name) since that's what's passed to the epid lookup.
+ */
+export async function buildReferenceInfo(
+  query: string,
+  reference: CardReference,
+  includeImage = true
+): Promise<ReferenceInfo> {
+  let imageUrl: string | null = null;
+  let itemWebUrl: string | null = null;
+  if (includeImage && reference.epid) {
+    try {
+      const found = await findReferenceListing(query, reference.epid);
+      imageUrl = found?.imageUrl ?? null;
+      itemWebUrl = found?.itemWebUrl ?? null;
+    } catch {
+      // Not worth failing the whole thing over — ebaySearchUrl below
+      // still gives a way to double-check the reference by hand.
+    }
+  }
+  return {
+    productName: reference.productName,
+    ungradedPriceDollars: (reference.ungradedPriceCents ?? 0) / 100,
+    imageUrl,
+    itemWebUrl,
+    ebaySearchUrl: `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(reference.productName + " " + reference.consoleName)}`,
+  };
+}
 
 /**
  * `includeReferenceImage` costs one extra eBay API call and is only
- * useful when a human is looking at the reference (the manual search
- * page) — the watchlist's automatic checks (checkCardAndSaveFinds below)
- * call this too, every ~30 minutes per watchlist card, and don't render
- * the reference at all, so it's off by default to not waste quota there.
+ * worthwhile when the reference is actually going to be shown to someone
+ * or saved — pass false to skip it (e.g. discovery's own per-listing
+ * lookups build their own reference info directly, only for candidates
+ * that already cleared the underpriced threshold).
  */
 export async function searchUnderpricedCards(
   query: string,
@@ -105,29 +125,7 @@ export async function searchUnderpricedCards(
     return a.priceDollars - b.priceDollars;
   });
 
-  let referenceInfo: CardReferenceInfo | null = null;
-  if (reference) {
-    let imageUrl: string | null = null;
-    let itemWebUrl: string | null = null;
-    if (includeReferenceImage && reference.epid) {
-      try {
-        const found = await findReferenceListing(query, reference.epid);
-        imageUrl = found?.imageUrl ?? null;
-        itemWebUrl = found?.itemWebUrl ?? null;
-      } catch {
-        // A missing illustrative photo isn't worth failing the whole
-        // search over — the always-present ebaySearchUrl below still
-        // gives the user a way to double-check the reference by hand.
-      }
-    }
-    referenceInfo = {
-      productName: reference.productName,
-      ungradedPriceDollars: (reference.ungradedPriceCents ?? 0) / 100,
-      imageUrl,
-      itemWebUrl,
-      ebaySearchUrl: `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(reference.productName + " " + reference.consoleName)}`,
-    };
-  }
+  const referenceInfo = reference ? await buildReferenceInfo(query, reference, includeReferenceImage) : null;
 
   return {
     query,
@@ -145,7 +143,7 @@ export async function searchUnderpricedCards(
  * run, up to 30 minutes of "did this even work?" with nothing to look at.
  */
 export async function checkCardAndSaveFinds(card: string, category: CardCategory): Promise<number> {
-  const result = await searchUnderpricedCards(card, category);
+  const result = await searchUnderpricedCards(card, category, true);
   const candidates: SavedFind[] = result.listings
     .filter((l) => l.isUnderpriced)
     .map((l) => ({
@@ -158,6 +156,8 @@ export async function checkCardAndSaveFinds(card: string, category: CardCategory
       percentBelowReference: l.percentBelowReference!,
       searchedFor: card,
       category,
+      source: "watchlist",
+      reference: result.reference ?? undefined,
       foundAt: new Date().toISOString(),
     }));
   return saveNewFinds(candidates);

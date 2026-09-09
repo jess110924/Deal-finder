@@ -15,7 +15,10 @@ export function proxy(request: NextRequest) {
   // no session cookie to present, so it's excluded from the cookie gate
   // here and instead checks its own bearer-style secret independently
   // (see app/api/cards/check-watchlist/route.ts).
-  if (request.nextUrl.pathname === "/api/cards/check-watchlist") {
+  if (
+    request.nextUrl.pathname === "/api/cards/check-watchlist" ||
+    request.nextUrl.pathname === "/api/cards/discover"
+  ) {
     return NextResponse.next();
   }
 

@@ -297,8 +297,24 @@ export default function CardWatchlist() {
                   {find.title}
                 </a>
                 <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  {find.category && `${CATEGORY_LABEL[find.category]} · `}Watchlist: {find.searchedFor}
+                  {find.category && `${CATEGORY_LABEL[find.category]} · `}
+                  {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                 </div>
+                {find.reference && (
+                  <a
+                    href={find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs flex items-center gap-1 mt-1"
+                    style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                  >
+                    {find.reference.imageUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={find.reference.imageUrl} alt="" className="w-4 h-4 rounded object-contain" style={{ background: "#fff" }} />
+                    )}
+                    Verify: ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
+                  </a>
+                )}
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
                 <span className="font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>

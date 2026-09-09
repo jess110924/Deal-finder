@@ -92,10 +92,13 @@ plain "search eBay for this exact product name" link is always shown
 instead, so there's always something to click through and double-check
 by hand.
 
-This only runs on the manual search (`includeReferenceImage` in
-`lib/cardComparison.ts`), not on watchlist checks — those run every ~30
-minutes per watchlist card and don't render the reference at all, so
-fetching an illustrative photo there would just be wasted eBay API calls.
+Every saved find — from the watchlist or from Discover (below) — carries
+this same reference info (`reference` on `SavedFind` in `lib/db.ts`), not
+just the manual search page. Discover in particular needs it: it matches
+freeform eBay titles to PriceCharting products with no human choosing the
+search term, so mismatches are more likely there than for a deliberately-
+typed watchlist name — the reference photo/link is the way to catch one
+before trusting it.
 
 ### Watchlist — automatic background checking
 
@@ -121,6 +124,73 @@ comma-separated). Bulk-added cards skip the immediate check (running a
 real search for 15-20+ cards sequentially would risk timing out) and
 just get picked up on the next scheduled run, same as any other add that
 happens to miss its instant check.
+
+### Discover — finding deals without naming a card first
+
+The watchlist only ever checks cards it's explicitly told about — it
+can't surface a card worth watching that nobody's added yet. Discover
+(`lib/cardDiscovery.ts`, `app/api/cards/discover/route.ts`, runs hourly
+via `.github/workflows/discover-deals.yml`) fills that gap: it browses
+eBay's live listings directly (no keyword, just the category — Sports or
+Pokémon), checks each one against its own PriceCharting match, and saves
+anything underpriced to the same "Saved finds" list as the watchlist.
+
+A few things this needed that a name-driven search doesn't — each found
+by actually running it live and looking at the real results, not assumed:
+
+- **What to browse.** eBay's Browse API allows a category-only browse
+  with no `q` — confirmed live. Sorted by price ascending it was almost
+  entirely near-worthless base commons (~$2-3); sorted by price
+  descending it surfaced ultra-rare autographs/jerseys/1-of-1s instead —
+  and *every one* of those came back matched against a wildly lower,
+  clearly-wrong PriceCharting reference (a $1500 1-of-10 autographed
+  jersey matched to an unrelated $6.50 base card), because PriceCharting's
+  catalog doesn't really cover one-of-a-kind memorabilia. Settled on
+  **sorted by newest-listed, within a $20-$300 band** (`lib/sources/ebay.ts`,
+  `browseCategory`) — the range PriceCharting's catalog actually covers
+  well (standard rookies/parallels), not the extremes.
+- **The Pokémon category isn't Pokémon-only.** eBay's `183454` ("CCG
+  Individual Cards") turned out to be a shared bucket across every
+  non-sports card game — a keyword-free browse of it came back full of
+  Naruto, Dragon Ball, One Piece, and Weiss Schwarz cards mixed in with
+  Pokémon (confirmed live). Anchoring the Pokémon browse with `q=pokemon`
+  fixed this completely (confirmed live: 15/15 results genuinely Pokémon
+  afterward) — that's a category-level anchor baked into the code, not a
+  card name you have to supply. Sports Trading Cards (212) didn't have
+  this problem — results were plain football/baseball/hockey/soccer, all
+  genuinely sports.
+- **Junk that isn't a card.** A plain category browse also turned up
+  non-card listings — a "Retail Shop Display Case" (an accessory) and a
+  "Baseball Card and Memorabilia Collection" (a lot) both showed up live
+  in testing. `isBundle()` (in `lib/cardComparison.ts`) already catches
+  lot/bundle titles; a second pattern in `lib/cardDiscovery.ts`
+  (`NON_CARD_PATTERN`) catches the accessory/collection kind it doesn't.
+- **Match quality is genuinely lower than a deliberate search.** This is
+  worth being honest about: testing live, feeding a full freeform eBay
+  title (year, set, parallel name, serial number, and all) into
+  PriceCharting's search frequently returned an unrelated product as the
+  top match rather than the right one — more often than not, in the
+  batches tested. The threshold direction protects against this turning
+  into a false "deal" (a bad match only becomes a problem if it happens
+  to look *underpriced*, and in every mismatch observed during testing it
+  went the other way — the listing was worth far more than whatever
+  unrelated product got matched, not less), so nothing false-positive
+  showed up in testing. But it does mean Discover may go a while between
+  genuine finds, and a higher bar than the usual 20%
+  (**25%**, `DISCOVERY_THRESHOLD_PERCENT`) adds a small further margin.
+  The real safeguard either way is the reference photo/link attached to
+  every discovered find — check that before trusting one, every time.
+- **API cost.** Each run makes one PriceCharting lookup per browsed
+  listing (~25 per category × 2 categories per hourly run), on top of
+  what the watchlist already uses — noticeably more than the watchlist
+  alone. That's why it runs hourly rather than every 30 minutes. Both the
+  batch size (`limit` in `discoverDeals`) and the cron schedule are easy
+  to tune up or down depending on what PriceCharting's plan actually
+  allows.
+
+No separate setup needed — it reuses the same `PRICECHARTING_API_KEY`,
+`EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`, `CRON_SECRET`, and
+`DEAL_FINDER_URL` GitHub secret already configured for the watchlist.
 
 This needed two things the rest of the project doesn't use: an actual
 database, and a way to run checks on a schedule with nobody's browser
@@ -337,3 +407,5 @@ site is wide open without it.
 - `app/api/cards/watchlist/bulk/route.ts` — bulk-add endpoint (no immediate check)
 - `app/api/cards/check-watchlist/route.ts` — the scheduled check endpoint
 - `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action
+- `lib/cardDiscovery.ts` — browses eBay live listings for deals with no name given
+- `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the hourly Discover run
