@@ -74,33 +74,49 @@ assumed to work from documentation alone.
 
 ### Verifying the reference is actually the right card
 
-The manual search page (not the watchlist — see below for why) shows a
-photo and a direct eBay link for the PriceCharting reference product
-itself, so it's obvious at a glance whether the price being compared
-against is really for the card that was searched for.
+Every place a reference product shows up — the manual search page, each
+saved find on the watchlist, each one Discover surfaces — links straight
+to that product's own page on PriceCharting/SportsCardsPro
+(`productUrl`, built by `buildProductUrl` in `lib/sources/pricecharting.ts`),
+plus a real photo where one's available. Requested directly: the "Verify"
+link originally pointed to an eBay listing instead of PriceCharting
+itself.
 
-PriceCharting's API doesn't return a photo directly, but newer/more
-searched-for products come back with an `epid` — an eBay catalog product
-id. eBay's Catalog API would resolve that directly to a product photo,
-but it needs a permission scope this app's key doesn't have (confirmed
-live: 403 "Insufficient permissions"). Filtering a normal Browse API
-search by that same epid works with the same basic scope already used
-everywhere else, and returns the exact matching product — confirmed live
-against the Luka Doncic Prizm card, whose epid it returned back exactly.
+PriceCharting's API doesn't return a page URL directly — this is built
+from the product's own console/product name (`/game/<console-slug>/
+<product-slug>`, lowercased and hyphenated), confirmed live rather than
+assumed: fetched the constructed URL for both a sports card
+(sportscardspro.com) and a Pokémon card (pricecharting.com) and checked
+the resulting page's `<title>` actually matched the product. It's built
+deterministically and never fetched or verified server-side per card —
+partly because there's no need to, and partly because trying to fetch it
+server-side hits Cloudflare's bot challenge (confirmed live, even for
+occasional traffic from here) that a real browser navigating there
+doesn't, since that's exactly what the challenge is built to tell apart.
 
-Not every product has an epid (confirmed absent on some older ones, e.g.
-1999 Base Set Charizard) — when it's missing, there's no photo, but a
-plain "search eBay for this exact product name" link is always shown
-instead, so there's always something to click through and double-check
-by hand.
+The photo comes from a separate, older mechanism: newer/more searched-for
+products come back from PriceCharting's API with an `epid` — an eBay
+catalog product id. eBay's Catalog API would resolve that directly to a
+product photo, but it needs a permission scope this app's key doesn't
+have (confirmed live: 403 "Insufficient permissions"). Filtering a normal
+Browse API search by that same epid works with the same basic scope
+already used everywhere else, and returns the exact matching product —
+confirmed live against the Luka Doncic Prizm card, whose epid it returned
+back exactly. Not every product has an epid (confirmed absent on some
+older ones, e.g. 1999 Base Set Charizard) — when it's missing, there's no
+photo, but the PriceCharting link (and, failing that, a plain eBay
+search) is always shown regardless, so there's always something to click
+through and double-check by hand.
 
 Every saved find — from the watchlist or from Discover (below) — carries
 this same reference info (`reference` on `SavedFind` in `lib/db.ts`), not
 just the manual search page. Discover in particular needs it: it matches
 freeform eBay titles to PriceCharting products with no human choosing the
 search term, so mismatches are more likely there than for a deliberately-
-typed watchlist name — the reference photo/link is the way to catch one
-before trusting it.
+typed watchlist name — the reference link is the way to catch one before
+trusting it. Finds saved before `productUrl` existed fall back to the
+older eBay-sourced links (the field is optional on `ReferenceInfo` for
+exactly this reason).
 
 ### Watchlist — automatic background checking
 

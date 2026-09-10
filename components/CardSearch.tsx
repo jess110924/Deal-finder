@@ -128,13 +128,18 @@ export default function CardSearch() {
                     ${result.reference.ungradedPriceDollars.toFixed(2)}
                   </div>
                   <a
-                    href={result.reference.itemWebUrl ?? result.reference.ebaySearchUrl}
+                    // The reference's own PriceCharting/SportsCardsPro
+                    // page — the actual source the price above came
+                    // from, so it's the most direct way to verify this
+                    // is the right card. Falls back to the eBay-sourced
+                    // links only if productUrl somehow isn't available.
+                    href={result.reference.productUrl ?? result.reference.itemWebUrl ?? result.reference.ebaySearchUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs"
                     style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
                   >
-                    {result.reference.itemWebUrl ? "View this card on eBay" : "Search eBay to double-check this is the right card"}
+                    {result.reference.productUrl ? "View this card on PriceCharting" : "Search eBay to double-check this is the right card"}
                   </a>
                 </div>
               </div>

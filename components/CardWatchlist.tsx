@@ -328,7 +328,12 @@ export default function CardWatchlist() {
                 </div>
                 {find.reference && (
                   <a
-                    href={find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                    // productUrl (the reference's own PriceCharting/
+                    // SportsCardsPro page) is the primary target — it's
+                    // the actual source the reference price came from.
+                    // Older saved finds predate this field, so fall back
+                    // to the eBay-sourced links for those.
+                    href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs flex items-center gap-1 mt-1"

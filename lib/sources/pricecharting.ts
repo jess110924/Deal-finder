@@ -64,3 +64,35 @@ export async function findCard(query: string, category: CardCategory): Promise<C
   if (products.length === 0) return null;
   return mapProduct(products[0]);
 }
+
+const SITE_BASE_BY_CATEGORY: Record<CardCategory, string> = {
+  sports: "https://www.sportscardspro.com",
+  pokemon: "https://www.pricecharting.com",
+};
+
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+/**
+ * Builds the product's own page on PriceCharting/SportsCardsPro — the
+ * `/game/<console-slug>/<product-slug>` pattern, confirmed live (on both
+ * domains, with the resulting page's title matching the product exactly)
+ * rather than assumed. Requested directly: the reference photo/link shown
+ * next to a saved find pointed to an eBay listing, not PriceCharting
+ * itself.
+ *
+ * Deliberately not fetched or verified per-card at request time —
+ * constructing the URL costs nothing, and trying to verify it server-side
+ * hits Cloudflare's bot challenge (confirmed live, even for occasional
+ * traffic from here) that a real browser navigating there doesn't —
+ * that's exactly what the challenge exists to tell apart. A handful of
+ * unusual product names could in principle slugify to a URL that's
+ * slightly off, but this hasn't been observed in testing.
+ */
+export function buildProductUrl(reference: CardReference, category: CardCategory): string {
+  return `${SITE_BASE_BY_CATEGORY[category]}/game/${slugify(reference.consoleName)}/${slugify(reference.productName)}`;
+}

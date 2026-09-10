@@ -64,6 +64,11 @@ export type ReferenceInfo = {
   imageUrl: string | null;
   itemWebUrl: string | null;
   ebaySearchUrl: string;
+  // The reference product's own page on PriceCharting/SportsCardsPro —
+  // the primary "verify this is the right card" link, since it's the
+  // actual source the reference price came from. Optional/absent on
+  // finds saved before this field existed.
+  productUrl?: string;
 };
 
 export type SavedFind = {

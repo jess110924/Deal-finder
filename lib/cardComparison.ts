@@ -1,4 +1,4 @@
-import { findCard, type CardCategory, type CardReference } from "@/lib/sources/pricecharting";
+import { findCard, buildProductUrl, type CardCategory, type CardReference } from "@/lib/sources/pricecharting";
 import { searchListings, findReferenceListing, type EbayListing } from "@/lib/sources/ebay";
 import { saveNewFinds, type ReferenceInfo, type SavedFind } from "@/lib/db";
 import { extractSearchKeywords, extractSerialDenominator } from "@/lib/cardKeywords";
@@ -52,17 +52,21 @@ export const UNDERPRICED_THRESHOLD_PERCENT = 20;
 /**
  * A real photo + link for this exact card, so it's obvious at a glance
  * whether whatever's being compared against is actually the right card.
- * The photo/link only exist when PriceCharting linked an eBay catalog id
- * (epid) for this product — not every product has one (confirmed: newer/
- * more-searched cards tend to, older ones sometimes don't) — but
- * `ebaySearchUrl` is always populated regardless, so there's always
- * something to click through and double-check by hand. `query` should be
- * the search text that found this reference (not necessarily the
- * product's own name) since that's what's passed to the epid lookup.
+ * `productUrl` (the reference's own PriceCharting/SportsCardsPro page) is
+ * always populated — it's the primary "verify" link, since it's the
+ * actual source the reference price came from. The eBay-sourced photo/
+ * link only exist when PriceCharting linked an eBay catalog id (epid) for
+ * this product — not every product has one (confirmed: newer/more-
+ * searched cards tend to, older ones sometimes don't) — and
+ * `ebaySearchUrl` is a secondary always-available fallback for those.
+ * `query` should be the search text that found this reference (not
+ * necessarily the product's own name) since that's what's passed to the
+ * epid lookup.
  */
 export async function buildReferenceInfo(
   query: string,
   reference: CardReference,
+  category: CardCategory,
   includeImage = true
 ): Promise<ReferenceInfo> {
   let imageUrl: string | null = null;
@@ -73,8 +77,8 @@ export async function buildReferenceInfo(
       imageUrl = found?.imageUrl ?? null;
       itemWebUrl = found?.itemWebUrl ?? null;
     } catch {
-      // Not worth failing the whole thing over — ebaySearchUrl below
-      // still gives a way to double-check the reference by hand.
+      // Not worth failing the whole thing over — ebaySearchUrl/productUrl
+      // below still give a way to double-check the reference by hand.
     }
   }
   return {
@@ -83,6 +87,7 @@ export async function buildReferenceInfo(
     imageUrl,
     itemWebUrl,
     ebaySearchUrl: `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(reference.productName + " " + reference.consoleName)}`,
+    productUrl: buildProductUrl(reference, category),
   };
 }
 
@@ -156,7 +161,7 @@ export async function searchUnderpricedCards(
     return a.priceDollars - b.priceDollars;
   });
 
-  const referenceInfo = reference ? await buildReferenceInfo(effectiveQuery, reference, includeReferenceImage) : null;
+  const referenceInfo = reference ? await buildReferenceInfo(effectiveQuery, reference, category, includeReferenceImage) : null;
 
   return {
     query,
