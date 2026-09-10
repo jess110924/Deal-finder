@@ -50,6 +50,16 @@ function findKeepWords(title: string, list: string[], allowPlural = false): stri
   return list.filter((word) => new RegExp(`\\b${escapeRegExp(word)}${suffix}\\b`).test(lower));
 }
 
+// Manufacturer names only — never a real subject, but can legitimately
+// sit right before the year in a title ("Panini 2024-25 Noir..."),
+// which guessLeadingSubject would otherwise happily hand back as the
+// "subject". Confirmed live this is a real, serious failure mode, not
+// theoretical: "Panini 2024-25 Noir Shadow Signatures Jalen Johnson
+// Hawks SHA-JJO Auto 58/99" guessed "Panini" as the subject, producing
+// the query "Panini /99" — every actual identifying word (the player)
+// gone — which matched a completely unrelated Josh Allen card.
+const BRAND_WORDS = new Set(["panini", "topps", "bowman", "donruss", "leaf", "upper", "deck", "score", "fleer"]);
+
 /**
  * Best-effort only, used when the caller doesn't already know the
  * subject (e.g. Discover, which has nothing but a raw eBay title to work
@@ -66,7 +76,12 @@ function guessLeadingSubject(title: string): string | null {
   const cutoff = yearMatch ? yearMatch.index! : slashIndex >= 0 ? slashIndex : -1;
   if (cutoff > 3) {
     const lead = title.slice(0, cutoff).replace(/[-–—]/g, " ").trim();
-    if (lead && lead.split(/\s+/).length <= 4) return lead;
+    const words = lead.split(/\s+/).filter(Boolean);
+    // Reject only when EVERY word is a known brand name (just "Panini"
+    // alone) — a mixed lead ("Panini Jalen Johnson", say) still has a
+    // real word to go on, so it's kept as before.
+    const allBrandWords = words.length > 0 && words.every((w) => BRAND_WORDS.has(w.toLowerCase()));
+    if (lead && words.length <= 4 && !allBrandWords) return lead;
   }
   return null;
 }

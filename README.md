@@ -345,6 +345,20 @@ A few things that made this trickier than it looks:
   full peer list is shown in the UI ("Show all N — check these are
   actually the same parallel") so a mismatch like this stays visible and
   checkable instead of silently skewing a hidden average.
+- **A real bug this whole mechanism had, caught live:** the subject-
+  guessing fallback (used when no subject is known, e.g. the main search
+  box) took whatever text sits before the year as the subject — but that
+  isn't always the player. Reported directly: `"Panini 2024-25 Noir
+  Shadow Signatures Jalen Johnson Hawks SHA-JJO Auto 58/99"` guessed
+  **"Panini"** (the manufacturer, sitting right before the year) as the
+  subject, producing the query `"Panini /99"` — every actual identifying
+  word, including the player's name, gone. That matched a completely
+  unrelated card. Fixed by rejecting a guess when every word in it is a
+  known manufacturer name (`BRAND_WORDS` in `lib/cardKeywords.ts`) — a
+  mixed lead like "Panini Jalen Johnson" still keeps a real word to go
+  on and isn't rejected, only a lead that's *entirely* brand names is.
+  Confirmed live: the same query now correctly returns "Jalen Johnson
+  [Gold] #7" from the right product line.
 
 This is used in three places: Player Search's peer-check (has a known
 subject from the search box), Discover's per-listing PriceCharting
