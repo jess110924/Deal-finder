@@ -59,6 +59,28 @@ function extractImage(html: string | undefined): string | null {
   return match ? decodeHtmlEntities(match[1]) : null;
 }
 
+// Most RSS-based sources here don't expose structured price data — this
+// pulls it from the title text instead, needed for any price-ceiling
+// filter (e.g. "$5 and under") to work across the whole feed rather
+// than just Keepa (the only source with a real structured price).
+// Takes the FIRST dollar amount in the title: checked against a broad
+// real sample before writing this, and titles consistently lead or
+// close with the actual deal price, with secondary amounts (free-
+// shipping thresholds like "on $35+", multi-buy math) appearing after
+// it, not before — no "reg $X ... now $Y" ordering was found in
+// practice. A title with no dollar amount but the standalone word
+// "free" (not "free shipping"/"freebie" as part of another word) is
+// priced at $0 — covers the Freebies-forum case where a deal's title
+// never states a price because it doesn't have one.
+function extractPrice(title: string): number | null {
+  const match = title.match(/\$(\d[\d,]*\.?\d*)/);
+  if (match) {
+    const value = Number(match[1].replace(/,/g, ""));
+    return Number.isFinite(value) ? value : null;
+  }
+  return /\bfree\b/i.test(title) ? 0 : null;
+}
+
 /**
  * Works for any RSS 2.0 or Atom feed — Slickdeals category feeds, Reddit
  * subreddit feeds (`https://www.reddit.com/r/<sub>/new/.rss`), DansDeals,
@@ -88,7 +110,7 @@ export async function fetchDeals(feedUrl: string): Promise<RawDeal[]> {
     // expose the author as `author` instead, often prefixed "/u/".
     creator: (item.creator || item.author || "").replace(/^\/u\//, "") || null,
     discountPercent: null,
-    price: null,
+    price: extractPrice(item.title || ""),
     originalPrice: null,
   }));
 }

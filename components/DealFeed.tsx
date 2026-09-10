@@ -48,6 +48,7 @@ export default function DealFeed() {
   const [activeSources, setActiveSources] = useState<Set<string>>(new Set(SOURCES.map((s) => s.name)));
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [stackableOnly, setStackableOnly] = useState(false);
+  const [maxPrice, setMaxPrice] = useState("");
 
   useEffect(() => {
     // Reading localStorage must happen client-side only — a lazy useState
@@ -110,11 +111,24 @@ export default function DealFeed() {
     });
   }
 
+  // Most sources don't carry structured price data — lib/sources/rss.ts
+  // extracts it from the title text where possible, but not every title
+  // has one (a link-only post, say). When a price ceiling is set, a deal
+  // with no known price is excluded rather than shown anyway — showing
+  // "under $5" and then including unknowns would undermine the filter,
+  // since there'd be no way to tell whether an unknown actually qualifies.
+  const maxPriceValue = maxPrice.trim() === "" ? null : Number(maxPrice);
+  const priceFilterActive = maxPriceValue != null && Number.isFinite(maxPriceValue);
+
   // No manual useMemo here — the React Compiler (enabled in this Next.js
   // version) handles memoizing derived values like this automatically.
   const filteredDeals = data
     ? data.deals.filter(
-        (d) => !dismissed.has(d.id) && activeSources.has(d.source) && (!stackableOnly || d.isStackable)
+        (d) =>
+          !dismissed.has(d.id) &&
+          activeSources.has(d.source) &&
+          (!stackableOnly || d.isStackable) &&
+          (!priceFilterActive || (d.price != null && d.price <= maxPriceValue))
       )
     : [];
   const visibleDeals =
@@ -191,6 +205,27 @@ export default function DealFeed() {
         <span className="text-xs" style={{ color: "var(--text-muted)" }}>
           Subscribe & Save + coupon-stacking style deals
         </span>
+        <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+          ·
+        </span>
+        <label className="flex items-center gap-1 text-xs" style={{ color: "var(--text-secondary)" }}>
+          $ and under:
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={maxPrice}
+            onChange={(e) => setMaxPrice(e.target.value)}
+            placeholder="e.g. 5"
+            className="w-16 rounded-md px-2 py-1 text-xs"
+            style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
+          />
+        </label>
+        {priceFilterActive && (
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            (deals with no listed price are hidden while this is set)
+          </span>
+        )}
       </div>
 
       <div className="flex gap-2 text-sm">

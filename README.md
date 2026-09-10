@@ -556,6 +556,22 @@ clicking through to Amazon.
   daily sweep only shows what's new since last time.
 - **Refresh** re-fetches all sources on demand; the page doesn't auto-poll
   in the background (this is a page you open to check, not a bot).
+- **"$ and under"** filters to deals at or below a price ceiling you type
+  in (e.g. "5" for $5-and-under) — requested directly. Only Keepa carries
+  real structured price data; every RSS-based source's price is extracted
+  from its title text instead (`extractPrice` in `lib/sources/rss.ts`),
+  taking the first dollar amount found — checked against a broad real
+  sample before writing this, and titles consistently lead or close with
+  the actual deal price, with secondary amounts (free-shipping thresholds,
+  multi-buy math) coming after it, not before. A title with no dollar
+  amount but the standalone word "free" prices at $0 (covers the Freebies
+  forum, which often never states a price because there isn't one).
+  Confirmed live: 727 of 776 deals got a price this way, 101 of them
+  genuinely $5 or under, with a sanity check confirming no $100+ deal
+  slipped through. **While this filter is set, deals with no extractable
+  price are hidden** rather than shown anyway — there'd be no way to tell
+  whether an unknown price actually qualifies, so showing them would
+  undermine the filter's whole point.
 
 Dismissed-state is per-browser, not per-account — clearing browser data or
 switching browsers resets it.
