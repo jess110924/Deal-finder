@@ -5,6 +5,13 @@ export type SourceConfig = {
   url?: string; // rss, single feed
   urls?: string[]; // rss, multiple feeds merged + deduped into one source (see "PC Parts" below)
   subreddit?: string; // reddit only
+  // rss only: require this word to literally appear (word-boundary,
+  // case-insensitive) in the title or description before keeping a
+  // result. Needed for the Target/Walmart sources below — confirmed
+  // live that Slickdeals' own search stems "Target" to also match
+  // "targeted" ("could be targeted" promo language, nothing to do with
+  // the retailer), which a plain keyword search alone can't filter out.
+  retailerMatch?: string;
 };
 
 export const SOURCES: SourceConfig[] = [
@@ -56,6 +63,32 @@ export const SOURCES: SourceConfig[] = [
   { name: "dealnews", label: "DealNews", type: "rss", url: "https://www.dealnews.com/?rss=1&sort=time" },
   { name: "9to5toys", label: "9to5Toys", type: "rss", url: "https://9to5toys.com/deals/feed/" },
   { name: "bensbargains", label: "Ben's Bargains", type: "rss", url: "https://bensbargains.com/rss/" },
+  // Retailer-specific, unlike PC Parts — kept as two separate sources
+  // rather than merged, since Target and Walmart deals don't overlap
+  // (a deal is at one store, not both) and toggling one off without the
+  // other is a real, reasonable thing to want. Confirmed live: a title
+  // not obviously mentioning the store (e.g. a plain "Kenmore Microwave"
+  // listing) can still be a genuine match — Slickdeals' search matches
+  // the deal's full body/link, not just the title, so a title-only
+  // relevance check would have wrongly looked noisy; the actual linked
+  // description confirmed target.com/walmart.com every time checked.
+  // `retailerMatch` guards against the one real false positive found live:
+  // Slickdeals' search stems "Target" to also match "targeted" (as in "may
+  // be a targeted offer"), unrelated to the retailer.
+  {
+    name: "target",
+    label: "Slickdeals: Target",
+    type: "rss",
+    url: "https://slickdeals.net/newsearch.php?q=Target&rss=1",
+    retailerMatch: "target",
+  },
+  {
+    name: "walmart",
+    label: "Slickdeals: Walmart",
+    type: "rss",
+    url: "https://slickdeals.net/newsearch.php?q=Walmart&rss=1",
+    retailerMatch: "walmart",
+  },
   { name: "free-games-cheapshark", label: "CheapShark (free games)", type: "cheapshark" },
   { name: "free-games-epic", label: "Epic Games (free games)", type: "epic" },
   { name: "keepa", label: "Keepa (Amazon price drops)", type: "keepa" },

@@ -1,7 +1,7 @@
 # Deal Finder
 
-A fast-scanning deal aggregator: one feed, pulling from 10 active sources
-(13 configured — 3 Reddit ones are built but currently disabled, see
+A fast-scanning deal aggregator: one feed, pulling from 12 active sources
+(15 configured — 3 Reddit ones are built but currently disabled, see
 Sources below), built for scanning quickly rather than passively waiting
 for Discord alerts. Dark theme, product thumbnails on every source. Also
 has a `/cards` page for finding underpriced sports card and Pokémon card
@@ -383,6 +383,8 @@ sources need no API key. The 9th (Keepa) needs your key, see below.
 | 9to5Toys | No | Tech/gadget deals, mostly Apple/Amazon-adjacent |
 | Slickdeals PC Parts | No | GPU/CPU/motherboard/SSD/PSU/RAM deals + PC builds |
 | Ben's Bargains | No | General deals firehose, Slickdeals-style |
+| Slickdeals: Target | No | Deals mentioning Target specifically |
+| Slickdeals: Walmart | No | Deals mentioning Walmart specifically |
 | CheapShark | No | PC games currently $0 across Steam, GOG, Epic, etc. |
 | Epic Games Store | No | Epic's own free-game giveaways |
 | **Keepa** | **Yes** | Real Amazon price-drop search across their whole catalog |
@@ -423,6 +425,24 @@ RSS 2.0 feed, 20 items per fetch, working images) rather than assumed
 from its reputation alone. One of its items matched this app's existing
 "stackable deal" detection (`lib/stackable.ts`, Subscribe & Save + coupon
 code) on the very first live test.
+
+**Slickdeals: Target / Slickdeals: Walmart** were requested directly
+("any way to check target and Walmart?"). Kept as two separate sources
+rather than merged like PC Parts — Target and Walmart deals don't
+overlap (a deal is at one store, not both) and toggling one off without
+the other is a reasonable thing to want. One real false positive turned
+up live and got fixed before shipping: Slickdeals' search stems "Target"
+to also match "targeted" (as in "this offer may be a *targeted* promo"),
+completely unrelated to the retailer — a BJ's Wholesale membership renewal
+showed up in the Target results this way. `SourceConfig` gained an
+optional `retailerMatch` field; when set, `aggregate.ts` requires that
+word to literally appear (word-boundary, case-insensitive) in the title
+or description before keeping a result — confirmed live this removed the
+BJ's false positive (and one more like it) while keeping every genuine
+match, including titles that don't obviously mention the store by
+themselves (Slickdeals' search matches a deal's full body/link, not just
+its title — a plain "Kenmore Microwave" listing turned out to genuinely
+link to target.com once checked).
 
 **Reddit (r/deals, r/GameDeals, r/buildapcsales) is fully built
 (`lib/sources/reddit.ts`, OAuth-based specifically because Reddit

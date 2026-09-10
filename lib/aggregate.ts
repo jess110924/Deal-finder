@@ -9,6 +9,11 @@ import type { Deal, RawDeal } from "@/lib/types";
 
 export type SourceResult = { name: string; label: string; ok: boolean; error?: string; count: number };
 
+function matchesRetailer(deal: RawDeal, retailer: string): boolean {
+  const pattern = new RegExp(`\\b${retailer}\\b`, "i");
+  return pattern.test(deal.title) || pattern.test(deal.description ?? "");
+}
+
 export async function aggregateDeals(): Promise<{ deals: Deal[]; results: SourceResult[] }> {
   const deals: Deal[] = [];
   const results: SourceResult[] = [];
@@ -40,6 +45,9 @@ export async function aggregateDeals(): Promise<{ deals: Deal[]; results: Source
               raw = succeeded.flatMap((r) => r.value).filter((d) => (seen.has(d.id) ? false : (seen.add(d.id), true)));
             } else {
               raw = await rss.fetchDeals(source.url!);
+            }
+            if (source.retailerMatch) {
+              raw = raw.filter((d) => matchesRetailer(d, source.retailerMatch!));
             }
             break;
           case "reddit":
