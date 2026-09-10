@@ -55,6 +55,7 @@ export const SOURCES: SourceConfig[] = [
   // the actual fetchDeals() parsing logic, not just that the URL 200s).
   { name: "dealnews", label: "DealNews", type: "rss", url: "https://www.dealnews.com/?rss=1&sort=time" },
   { name: "9to5toys", label: "9to5Toys", type: "rss", url: "https://9to5toys.com/deals/feed/" },
+  { name: "bensbargains", label: "Ben's Bargains", type: "rss", url: "https://bensbargains.com/rss/" },
   { name: "free-games-cheapshark", label: "CheapShark (free games)", type: "cheapshark" },
   { name: "free-games-epic", label: "Epic Games (free games)", type: "epic" },
   { name: "keepa", label: "Keepa (Amazon price drops)", type: "keepa" },

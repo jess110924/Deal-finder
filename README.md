@@ -1,7 +1,7 @@
 # Deal Finder
 
-A fast-scanning deal aggregator: one feed, pulling from 9 active sources
-(12 configured — 3 Reddit ones are built but currently disabled, see
+A fast-scanning deal aggregator: one feed, pulling from 10 active sources
+(13 configured — 3 Reddit ones are built but currently disabled, see
 Sources below), built for scanning quickly rather than passively waiting
 for Discord alerts. Dark theme, product thumbnails on every source. Also
 has a `/cards` page for finding underpriced sports card and Pokémon card
@@ -382,6 +382,7 @@ sources need no API key. The 9th (Keepa) needs your key, see below.
 | DealNews | No | Editorially-vetted deals across retailers, all categories |
 | 9to5Toys | No | Tech/gadget deals, mostly Apple/Amazon-adjacent |
 | Slickdeals PC Parts | No | GPU/CPU/motherboard/SSD/PSU/RAM deals + PC builds |
+| Ben's Bargains | No | General deals firehose, Slickdeals-style |
 | CheapShark | No | PC games currently $0 across Steam, GOG, Epic, etc. |
 | Epic Games Store | No | Epic's own free-game giveaways |
 | **Keepa** | **Yes** | Real Amazon price-drop search across their whole catalog |
@@ -414,6 +415,14 @@ live: 113 deduped results, real GPU/CPU/RAM/SSD/motherboard/PSU deals and
 some full-PC-build listings mixed in (expected — a prebuilt desktop's
 listing mentioning its GPU/CPU specs legitimately matches those searches
 too).
+
+**Ben's Bargains** — a long-running, Slickdeals-style aggregator, added
+after being asked directly for other sites like Slickdeals. Same pattern
+as DealNews/9to5Toys: verified live before adding (real, currently-active
+RSS 2.0 feed, 20 items per fetch, working images) rather than assumed
+from its reputation alone. One of its items matched this app's existing
+"stackable deal" detection (`lib/stackable.ts`, Subscribe & Save + coupon
+code) on the very first live test.
 
 **Reddit (r/deals, r/GameDeals, r/buildapcsales) is fully built
 (`lib/sources/reddit.ts`, OAuth-based specifically because Reddit
