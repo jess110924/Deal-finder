@@ -7,7 +7,14 @@ import { discoverDeals } from "@/lib/cardDiscovery";
  * check-watchlist: protected by its own secret rather than the site's
  * cookie-based login (excluded from that in proxy.ts), since a script has
  * no session to present.
+ *
+ * 60s is the max Vercel's Hobby plan allows a function to declare — a real
+ * production run timed out with no response at all before this and the
+ * concurrency fix in lib/cardDiscovery.ts were added, so this is a backstop
+ * on top of that fix, not a substitute for it.
  */
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
@@ -17,15 +24,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const results: { category: string; ok: boolean; newFinds?: number; error?: string }[] = [];
-  for (const category of ["sports", "pokemon"] as const) {
-    try {
-      const newFinds = await discoverDeals(category);
-      results.push({ category, ok: true, newFinds });
-    } catch (err) {
-      results.push({ category, ok: false, error: (err as Error).message });
-    }
-  }
+  const settled = await Promise.allSettled(
+    (["sports", "pokemon"] as const).map((category) => discoverDeals(category))
+  );
+  const results = settled.map((r, i) => {
+    const category = (["sports", "pokemon"] as const)[i];
+    return r.status === "fulfilled"
+      ? { category, ok: true, newFinds: r.value }
+      : { category, ok: false, error: (r.reason as Error).message };
+  });
 
   return NextResponse.json({ results });
 }

@@ -29,6 +29,29 @@ const NON_CARD_PATTERN =
 // checked before trusting it.
 const DISCOVERY_THRESHOLD_PERCENT = 25;
 
+// Doing these one at a time (the original design) meant up to 25
+// sequential PriceCharting round-trips per category, ~50 total across
+// both categories per run — confirmed live this is slow enough to blow
+// past Vercel's serverless function timeout entirely (a real production
+// run timed out with no response at all after 60s). Fully unbounded
+// concurrency (all 25 at once) risks looking like abusive traffic to
+// PriceCharting's API instead, so this runs a bounded number of workers
+// pulling from a shared queue — parallel, but capped.
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
+const LOOKUP_CONCURRENCY = 6;
+
 /**
  * Browses a category's live eBay listings (no name needed) and checks
  * each one against its own PriceCharting match, saving anything that
@@ -38,13 +61,11 @@ const DISCOVERY_THRESHOLD_PERCENT = 25;
  */
 export async function discoverDeals(category: CardCategory, limit = 25): Promise<number> {
   const listings = await browseCategory(category, limit);
-  const candidates: SavedFind[] = [];
+  const toCheck = listings.filter(
+    (listing) => !isGraded(listing.condition) && !isBundle(listing.title) && !NON_CARD_PATTERN.test(listing.title)
+  );
 
-  for (const listing of listings) {
-    if (isGraded(listing.condition) || isBundle(listing.title) || NON_CARD_PATTERN.test(listing.title)) {
-      continue;
-    }
-
+  const results = await mapWithConcurrency(toCheck, LOOKUP_CONCURRENCY, async (listing): Promise<SavedFind | null> => {
     // Discover has no separately-known player name to anchor on (unlike
     // Player Search, which gets it from the search box) — this can only
     // go by whatever it can infer from the title itself, and quietly
@@ -58,16 +79,16 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
     try {
       reference = await findCard(query, category);
     } catch {
-      continue; // one bad PriceCharting lookup shouldn't kill the whole run
+      return null; // one bad PriceCharting lookup shouldn't kill the whole run
     }
-    if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) continue;
+    if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) return null;
 
     const percentBelowReference =
       ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
-    if (percentBelowReference < DISCOVERY_THRESHOLD_PERCENT) continue;
+    if (percentBelowReference < DISCOVERY_THRESHOLD_PERCENT) return null;
 
     const referenceInfo = await buildReferenceInfo(query, reference);
-    candidates.push({
+    return {
       itemId: listing.itemId,
       title: listing.title,
       priceDollars: listing.priceCents / 100,
@@ -80,8 +101,9 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
       source: "discovery",
       reference: referenceInfo,
       foundAt: new Date().toISOString(),
-    });
-  }
+    };
+  });
 
+  const candidates = results.filter((r): r is SavedFind => r !== null);
   return saveNewFinds(candidates);
 }

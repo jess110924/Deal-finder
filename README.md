@@ -226,6 +226,26 @@ by actually running it live and looking at the real results, not assumed:
   batch size (`limit` in `discoverDeals`) and the cron schedule are easy
   to tune up or down depending on what PriceCharting's plan actually
   allows.
+- **This actually broke in production, silently, for a while.** Both this
+  endpoint and check-watchlist failed on every single scheduled run from
+  the day they were set up — not a code bug, a missing GitHub Actions
+  secret (`DEAL_FINDER_URL` was never actually added, so the workflow's
+  curl command had no host to send the request to and failed instantly
+  with a malformed-URL error; `CRON_SECRET` was missing too). Diagnosed
+  by checking the GitHub Actions run history directly
+  (`api.github.com/repos/.../actions/workflows/.../runs`) rather than
+  guessing. Once those two secrets were actually added, a second, real
+  bug surfaced: the original `discoverDeals` checked each browsed listing
+  against PriceCharting one at a time in a loop — up to 25 sequential
+  round-trips per category, ~50 total per run — which was slow enough to
+  exceed Vercel's serverless function timeout outright (confirmed live: a
+  production run got no response at all after 60 seconds). Fixed with
+  bounded concurrency (`mapWithConcurrency` in `lib/cardDiscovery.ts`,
+  6 at a time — fully unbounded, all 25 at once, risks looking like
+  abusive traffic to PriceCharting instead) plus running both categories
+  in parallel rather than sequentially, and an explicit
+  `export const maxDuration = 60` (Vercel Hobby's ceiling) as a backstop.
+  Confirmed live after the fix: full run in ~18 seconds.
 
 No separate setup needed — it reuses the same `PRICECHARTING_API_KEY`,
 `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`, `CRON_SECRET`, and
