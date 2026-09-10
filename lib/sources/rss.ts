@@ -30,6 +30,23 @@ function cleanDescription(raw: string): string {
   return REDDIT_BOILERPLATE.test(text) ? "" : text;
 }
 
+// A CDATA-wrapped <description> (common in WordPress feeds — 9to5Toys)
+// is opaque text to the XML parser, so entities inside it never get
+// decoded the way a normal element's text would — confirmed live: a
+// 9to5Toys image URL came through with literal "&#038;" in its query
+// string instead of "&", which a browser sends to the image CDN as-is,
+// not as the "&" it's supposed to mean.
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 // `content:encoded` (RSS 2.0) carries the full post HTML, usually with a
 // thumbnail <img> right at the top; `content` is Atom's equivalent for
 // Reddit. Checked in that order since a feed with both would have the
@@ -39,7 +56,7 @@ function cleanDescription(raw: string): string {
 function extractImage(html: string | undefined): string | null {
   if (!html) return null;
   const match = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
-  return match ? match[1] : null;
+  return match ? decodeHtmlEntities(match[1]) : null;
 }
 
 /**

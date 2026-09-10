@@ -1,9 +1,11 @@
 # Deal Finder
 
-A fast-scanning deal aggregator: one feed, pulling from 9 sources, built for
-scanning quickly rather than passively waiting for Discord alerts. Dark
-theme, product thumbnails on every source. Also has a `/cards` page for
-finding underpriced sports card and Pokémon card listings on eBay.
+A fast-scanning deal aggregator: one feed, pulling from 8 active sources
+(11 configured — 3 Reddit ones are built but currently disabled, see
+Sources below), built for scanning quickly rather than passively waiting
+for Discord alerts. Dark theme, product thumbnails on every source. Also
+has a `/cards` page for finding underpriced sports card and Pokémon card
+listings on eBay.
 
 ## /cards — underpriced trading card finder
 
@@ -375,11 +377,42 @@ sources need no API key. The 9th (Keepa) needs your key, see below.
 |---|---|---|
 | Slickdeals Freebies | No | Free samples, free food/restaurant offers |
 | Slickdeals Hot Deals | No | General deals firehose |
-| r/deals, r/GameDeals, r/buildapcsales | No | Reddit deal communities |
+| r/deals, r/GameDeals, r/buildapcsales | No | Reddit deal communities — disabled, see below |
 | DansDeals | No | Credit card bonuses, cashback/points stacking |
+| DealNews | No | Editorially-vetted deals across retailers, all categories |
+| 9to5Toys | No | Tech/gadget deals, mostly Apple/Amazon-adjacent |
 | CheapShark | No | PC games currently $0 across Steam, GOG, Epic, etc. |
 | Epic Games Store | No | Epic's own free-game giveaways |
 | **Keepa** | **Yes** | Real Amazon price-drop search across their whole catalog |
+
+**DealNews and 9to5Toys** were added specifically to increase deal volume
+(confirmed live before adding: ~49 and ~50 deals per fetch respectively,
+real currently-active listings, not stale/cached content) — both are
+plain RSS 2.0, no key needed, added the same way DansDeals was. One real
+bug this surfaced: 9to5Toys' `<description>` is CDATA-wrapped, so HTML
+entities inside it (its image URL had a literal `&#038;` instead of `&`)
+never get XML-decoded the normal way — confirmed live, and fixed with an
+entity-decode step in `lib/sources/rss.ts`'s `extractImage()` rather than
+sending a malformed query string to the image CDN.
+
+**Reddit (r/deals, r/GameDeals, r/buildapcsales) is fully built
+(`lib/sources/reddit.ts`, OAuth-based specifically because Reddit
+403s/429s anonymous RSS scraping from cloud IPs) but currently
+commented out in `lib/config.ts`** pending `REDDIT_CLIENT_ID`/
+`REDDIT_CLIENT_SECRET` — re-enable by uncommenting those three lines and
+adding the two env vars once a Reddit script-type app is set up. This is
+the single biggest lever for more deal volume left on the table.
+
+**Other easy levers, not yet done:**
+- `KEEPA_MIN_DISCOUNT` (default 40) is a tunable env var, not a hard
+  limit — lowering it (e.g. to 25) surfaces more real deals from the same
+  API call, at no extra token cost. The independent `salesRankDrops90 > 0`
+  check (see below) still guards against fake-looking ones regardless of
+  where this threshold is set, so lowering it doesn't reopen that problem.
+- [IsThereAnyDeal](https://isthereanydeal.com/apps/) has a free public API
+  that aggregates game deals across far more storefronts than CheapShark +
+  Epic alone (Steam, GOG, Humble, Fanatical, and more) — would need a free
+  API key signup, not yet integrated.
 
 ### Setting up Keepa
 
