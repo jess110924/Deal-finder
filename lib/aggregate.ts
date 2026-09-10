@@ -19,7 +19,28 @@ export async function aggregateDeals(): Promise<{ deals: Deal[]; results: Source
         let raw: RawDeal[];
         switch (source.type) {
           case "rss":
-            raw = await rss.fetchDeals(source.url!);
+            if (source.urls) {
+              // Multiple feeds merged into one source (e.g. Slickdeals PC
+              // Parts' six keyword searches) — isolates one bad feed from
+              // the rest the same way per-source isolation already works
+              // at the top level, instead of failing the whole merged
+              // source over one flaky sub-fetch. Deduped by id since the
+              // same deal often matches more than one keyword search
+              // (a full-PC bundle mentioning both a GPU and a motherboard,
+              // for instance).
+              const settled = await Promise.allSettled(source.urls.map((u) => rss.fetchDeals(u)));
+              const succeeded = settled.filter(
+                (r): r is PromiseFulfilledResult<RawDeal[]> => r.status === "fulfilled"
+              );
+              if (succeeded.length === 0) {
+                const firstError = (settled[0] as PromiseRejectedResult).reason as Error;
+                throw new Error(firstError?.message ?? "All feeds failed");
+              }
+              const seen = new Set<string>();
+              raw = succeeded.flatMap((r) => r.value).filter((d) => (seen.has(d.id) ? false : (seen.add(d.id), true)));
+            } else {
+              raw = await rss.fetchDeals(source.url!);
+            }
             break;
           case "reddit":
             raw = await reddit.fetchDeals(source.subreddit!);

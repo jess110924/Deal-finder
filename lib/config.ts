@@ -2,7 +2,8 @@ export type SourceConfig = {
   name: string;
   label: string;
   type: "rss" | "reddit" | "cheapshark" | "epic" | "keepa";
-  url?: string; // rss only
+  url?: string; // rss, single feed
+  urls?: string[]; // rss, multiple feeds merged + deduped into one source (see "PC Parts" below)
   subreddit?: string; // reddit only
 };
 
@@ -25,6 +26,30 @@ export const SOURCES: SourceConfig[] = [
   // { name: "reddit-gamedeals", label: "r/GameDeals", type: "reddit", subreddit: "GameDeals" },
   // { name: "reddit-buildapcsales", label: "r/buildapcsales", type: "reddit", subreddit: "buildapcsales" },
   { name: "dansdeals", label: "DansDeals", type: "rss", url: "https://www.dansdeals.com/feed/" },
+  // Slickdeals has no dedicated "PC parts" forum to filter by — its forums
+  // are discussion sections (Hot Deals, Freebies, Tech Support, etc.), not
+  // product categories. Its site-wide keyword search does work well for
+  // this though (confirmed live per keyword: GPU, CPU, motherboard, SSD,
+  // "power supply", and "RAM DDR5" each returned real, relevant PC
+  // component/build deals — "OR"-joining terms into one query does not
+  // work, it was tried and returned unrelated noise). Six separate
+  // searches merged into one source (deduped by item id in aggregate.ts)
+  // rather than six separate toggles in the feed UI — several of these
+  // already return overlapping results for full-PC bundle deals that
+  // mention multiple components at once.
+  {
+    name: "pc-parts",
+    label: "Slickdeals PC Parts",
+    type: "rss",
+    urls: [
+      "https://slickdeals.net/newsearch.php?q=GPU&rss=1",
+      "https://slickdeals.net/newsearch.php?q=CPU&rss=1",
+      "https://slickdeals.net/newsearch.php?q=motherboard&rss=1",
+      "https://slickdeals.net/newsearch.php?q=SSD&rss=1",
+      "https://slickdeals.net/newsearch.php?q=power%20supply&rss=1",
+      "https://slickdeals.net/newsearch.php?q=RAM%20DDR5&rss=1",
+    ],
+  },
   // Both confirmed live before adding: real, currently-active RSS 2.0
   // feeds with genuine deal content and working images (verified through
   // the actual fetchDeals() parsing logic, not just that the URL 200s).

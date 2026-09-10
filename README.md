@@ -1,7 +1,7 @@
 # Deal Finder
 
-A fast-scanning deal aggregator: one feed, pulling from 8 active sources
-(11 configured — 3 Reddit ones are built but currently disabled, see
+A fast-scanning deal aggregator: one feed, pulling from 9 active sources
+(12 configured — 3 Reddit ones are built but currently disabled, see
 Sources below), built for scanning quickly rather than passively waiting
 for Discord alerts. Dark theme, product thumbnails on every source. Also
 has a `/cards` page for finding underpriced sports card and Pokémon card
@@ -381,6 +381,7 @@ sources need no API key. The 9th (Keepa) needs your key, see below.
 | DansDeals | No | Credit card bonuses, cashback/points stacking |
 | DealNews | No | Editorially-vetted deals across retailers, all categories |
 | 9to5Toys | No | Tech/gadget deals, mostly Apple/Amazon-adjacent |
+| Slickdeals PC Parts | No | GPU/CPU/motherboard/SSD/PSU/RAM deals + PC builds |
 | CheapShark | No | PC games currently $0 across Steam, GOG, Epic, etc. |
 | Epic Games Store | No | Epic's own free-game giveaways |
 | **Keepa** | **Yes** | Real Amazon price-drop search across their whole catalog |
@@ -395,13 +396,35 @@ never get XML-decoded the normal way — confirmed live, and fixed with an
 entity-decode step in `lib/sources/rss.ts`'s `extractImage()` rather than
 sending a malformed query string to the image CDN.
 
+**Slickdeals PC Parts** was requested directly ("find PC parts for
+cheap") and needed a different approach than DealNews/9to5Toys: Slickdeals
+has no dedicated PC-parts *forum* to filter by (its forums are discussion
+sections — Hot Deals, Freebies, Tech Support — not product categories),
+but its site-wide keyword search does work well for this, confirmed live
+per term (GPU, CPU, motherboard, SSD, "power supply", "RAM DDR5" each
+returned real, relevant results; joining terms with "OR" into one query
+was tried and does not work — it returns unrelated noise instead).
+Rather than six separate always-visible source toggles in the feed UI,
+`lib/config.ts`'s `SourceConfig` gained an optional `urls: string[]`
+(alongside the existing single `url`) — `aggregate.ts` fetches all of
+them with `Promise.allSettled` (so one bad sub-fetch doesn't fail the
+whole merged source) and dedupes by item id, since a single full-PC-build
+deal often matches several of the keyword searches at once. Confirmed
+live: 113 deduped results, real GPU/CPU/RAM/SSD/motherboard/PSU deals and
+some full-PC-build listings mixed in (expected — a prebuilt desktop's
+listing mentioning its GPU/CPU specs legitimately matches those searches
+too).
+
 **Reddit (r/deals, r/GameDeals, r/buildapcsales) is fully built
 (`lib/sources/reddit.ts`, OAuth-based specifically because Reddit
 403s/429s anonymous RSS scraping from cloud IPs) but currently
 commented out in `lib/config.ts`** pending `REDDIT_CLIENT_ID`/
 `REDDIT_CLIENT_SECRET` — re-enable by uncommenting those three lines and
 adding the two env vars once a Reddit script-type app is set up. This is
-the single biggest lever for more deal volume left on the table.
+the single biggest lever for more deal volume left on the table — r/
+buildapcsales specifically would meaningfully add to PC parts coverage
+on top of Slickdeals PC Parts above, since it's community-curated rather
+than keyword-matched.
 
 **Other easy levers, not yet done:**
 - `KEEPA_MIN_DISCOUNT` (default 40) is a tunable env var, not a hard
