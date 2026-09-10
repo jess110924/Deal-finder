@@ -1,7 +1,7 @@
 # Deal Finder
 
-A fast-scanning deal aggregator: one feed, pulling from 12 active sources
-(15 configured — 3 Reddit ones are built but currently disabled, see
+A fast-scanning deal aggregator: one feed, pulling from 14 active sources
+(17 configured — 3 Reddit ones are built but currently disabled, see
 Sources below), built for scanning quickly rather than passively waiting
 for Discord alerts. Dark theme, product thumbnails on every source. Also
 has a `/cards` page for finding underpriced sports card and Pokémon card
@@ -385,6 +385,8 @@ sources need no API key. The 9th (Keepa) needs your key, see below.
 | Ben's Bargains | No | General deals firehose, Slickdeals-style |
 | Slickdeals: Target | No | Deals mentioning Target specifically |
 | Slickdeals: Walmart | No | Deals mentioning Walmart specifically |
+| Slickdeals: Food & Grocery | No | Grocery items, restaurant gift cards/offers |
+| Slickdeals: More Categories | No | Clothing, shoes, kitchen, toys, beauty, pet, travel |
 | CheapShark | No | PC games currently $0 across Steam, GOG, Epic, etc. |
 | Epic Games Store | No | Epic's own free-game giveaways |
 | **Keepa** | **Yes** | Real Amazon price-drop search across their whole catalog |
@@ -443,6 +445,26 @@ match, including titles that don't obviously mention the store by
 themselves (Slickdeals' search matches a deal's full body/link, not just
 its title — a plain "Kenmore Microwave" listing turned out to genuinely
 link to target.com once checked).
+
+**Slickdeals: Food & Grocery / Slickdeals: More Categories** were added
+after being asked directly for maximum coverage ("food and all others...
+anything and everything"). Checked for a dedicated grocery/food deals
+site first — Krazy Coupon Lady's `/feed/` just redirects to their
+JS-rendered homepage (no real feed behind it), Groupon has no RSS at
+all — so both use the same keyword-search approach as PC Parts/Target/
+Walmart. Worth knowing about the tradeoff made here: Slickdeals caps
+*every* RSS feed at 25 items regardless of any parameter tried
+(confirmed live), so a less-frequent category like food was already
+liable to get crowded out of the generic Hot Deals firehose by
+higher-volume ones even though it's technically posted there — a
+dedicated search guarantees it a slice of visibility regardless. More
+Categories in particular is intentionally broad-net rather than
+precision-tuned: unlike Target/Walmart, there's no single brand word to
+`retailerMatch` a whole category against, so it accepts more noise in
+exchange for breadth (a Kindle ebook slipped into "beauty" results in
+testing) — the same tradeoff PC Parts already makes for full-PC-bundle
+listings. Together these push total live feed volume from ~551 to ~776
+in testing.
 
 **Reddit (r/deals, r/GameDeals, r/buildapcsales) is fully built
 (`lib/sources/reddit.ts`, OAuth-based specifically because Reddit

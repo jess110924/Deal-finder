@@ -89,6 +89,44 @@ export const SOURCES: SourceConfig[] = [
     url: "https://slickdeals.net/newsearch.php?q=Walmart&rss=1",
     retailerMatch: "walmart",
   },
+  // Requested directly ("I also want deals for food and all others").
+  // Slickdeals' 25-item cap on every RSS feed (confirmed live — no
+  // parameter raises it) means less-frequent categories like food
+  // already get crowded out of the generic Hot Deals firehose by
+  // higher-volume ones; a dedicated search guarantees them their own
+  // slice of visibility regardless. Checked for a dedicated grocery/food
+  // deals site first (Krazy Coupon Lady, Groupon) — neither has a working
+  // RSS feed (Krazy Coupon Lady's /feed/ just redirects to their
+  // JS-rendered homepage; Groupon has none) — so this uses the same
+  // keyword-search approach as PC Parts/Target/Walmart instead.
+  {
+    name: "food-grocery",
+    label: "Slickdeals: Food & Grocery",
+    type: "rss",
+    urls: [
+      "https://slickdeals.net/newsearch.php?q=grocery&rss=1",
+      "https://slickdeals.net/newsearch.php?q=restaurant&rss=1",
+    ],
+  },
+  // Broad, best-effort coverage of everything else — accepts more noise
+  // than the more targeted sources above in exchange for breadth (same
+  // tradeoff PC Parts already accepts for full-PC-bundle listings).
+  // Unlike Target/Walmart, there's no single word to retailerMatch
+  // against for a whole category, so this doesn't get that extra filter.
+  {
+    name: "more-categories",
+    label: "Slickdeals: More Categories",
+    type: "rss",
+    urls: [
+      "https://slickdeals.net/newsearch.php?q=clothing&rss=1",
+      "https://slickdeals.net/newsearch.php?q=shoes&rss=1",
+      "https://slickdeals.net/newsearch.php?q=kitchen&rss=1",
+      "https://slickdeals.net/newsearch.php?q=toys&rss=1",
+      "https://slickdeals.net/newsearch.php?q=beauty&rss=1",
+      "https://slickdeals.net/newsearch.php?q=pet%20supplies&rss=1",
+      "https://slickdeals.net/newsearch.php?q=travel&rss=1",
+    ],
+  },
   { name: "free-games-cheapshark", label: "CheapShark (free games)", type: "cheapshark" },
   { name: "free-games-epic", label: "Epic Games (free games)", type: "epic" },
   { name: "keepa", label: "Keepa (Amazon price drops)", type: "keepa" },
