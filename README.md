@@ -402,6 +402,74 @@ this reason). Scoring fixes "matched a completely different player,"
 not "matched the right player's wrong year" when the query itself
 doesn't say which year.
 
+### The real root cause — one shared reference for every listing in a search
+
+Reported directly again after the fix above ("cards still don't match
+so the data isn't accurate") — this was a deeper, architectural problem
+the ranking fix didn't touch. A real production example made it obvious:
+a watchlist entry just named **"Luka doncic"** (no year/set/parallel)
+flagged a $29.99 2024-25 Panini Obsidian Red Electric Etch parallel as
+"45% under reference" — against a 2018 Panini Prizm base card's $54.98
+price. Two completely unrelated products, sharing nothing but a player's
+name.
+
+The cause: `searchUnderpricedCards` ran `findCard` **once**, for the
+overall search query, and compared *every* listing it got back against
+that single result. That's fine for a specific query where every listing
+really is the same card — but a broad query like a bare player name
+returns listings spanning dozens of genuinely different cards, and
+comparing all of them against one shared reference is comparing apples
+to oranges. Discover already worked correctly this whole time for
+exactly this reason — it checks each browsed listing against its own
+match, never a shared one — so it was the correctness fix that needed
+to reach the manual search and watchlist too, not a new one to invent.
+
+`evaluateListing` in `lib/cardComparison.ts` now does exactly what
+Discover's per-listing check does: for each listing, look up its own
+best-matching PriceCharting product (using the same `extractSearchKeywords`
++ relevance-scored `findCard` already fixed above) and compute
+*that* listing's underpriced status against *its own* match.
+`searchUnderpricedCards`'s original single `findCard` call still runs —
+it's shown at the top of the manual search page as context for the
+overall query — but it no longer decides whether any individual listing
+below it counts as a deal. Confirmed live: the same bare `"Luka doncic"`
+search now shows each listing correctly matched to its own specific
+card (a 2019-20 Hoops Silver Holo parallel priced against its own $401
+reference, a 2020-21 Panini Instant Dirk Nowitzki/Luka dual-player
+card `/3` against its own $560 reference, etc.) instead of one number
+applied to all of them.
+
+**Real costs this introduced, and what was done about each:**
+
+- **Every listing now costs its own PriceCharting lookup** (up to ~30
+  per search, instead of 1) — checked with bounded concurrency
+  (`mapWithConcurrency`, extracted to `lib/concurrency.ts` and shared
+  with Discover, which already used the same pattern) rather than
+  sequentially, the same fix Discover's own timeout problem already
+  needed. Concurrency is 12, tuned up from Discovery's original 6 after
+  measuring live: a broad search that took 24-32 seconds at concurrency
+  6 dropped to 3-5 seconds at 12, with no errors — PriceCharting hasn't
+  shown any rate-limiting behavior in any testing throughout this
+  project, unlike sportscardspro.com/pricecharting.com's own *website*
+  (Cloudflare-protected, unrelated to the API).
+- **The watchlist's scheduled check got meaningfully slower per card**
+  (each card now does its own ~30 lookups instead of 1), which put a
+  realistic watchlist size right up against Vercel's 60-second function
+  ceiling if run sequentially, the same failure mode Discover already
+  hit once. Fixed the same way: `app/api/cards/check-watchlist/route.ts`
+  now checks up to 3 watchlist cards concurrently (`WATCHLIST_CONCURRENCY`)
+  instead of one at a time, and declares `maxDuration = 60` as a backstop.
+- **The extra eBay photo lookup inside `buildReferenceInfo`** only runs
+  for listings that actually clear the underpriced threshold, not all
+  ~30 checked — the same cost-control Discover already used, now applied
+  here too, so the added accuracy doesn't multiply the eBay call count
+  on top of the PriceCharting one.
+
+The manual search page also changed to reflect this: the listings list
+now shows each listing's own match beneath it ("vs $X for '...'", with
+its own PriceCharting link) rather than implying every row was checked
+against the box at the top of the page.
+
 ## Stack
 
 - Next.js 16 (App Router) + TypeScript + Tailwind

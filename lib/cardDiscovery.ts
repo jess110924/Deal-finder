@@ -8,6 +8,7 @@ import {
 } from "@/lib/cardComparison";
 import { extractSearchKeywords } from "@/lib/cardKeywords";
 import { saveNewFinds, type SavedFind } from "@/lib/db";
+import { mapWithConcurrency } from "@/lib/concurrency";
 
 // Browsed listings are freeform real-world titles, not a deliberate search
 // query — more likely to include things that aren't a single raw card at
@@ -28,27 +29,6 @@ const NON_CARD_PATTERN =
 // reference photo/link (via buildReferenceInfo) so it can be visually
 // checked before trusting it.
 const DISCOVERY_THRESHOLD_PERCENT = 25;
-
-// Doing these one at a time (the original design) meant up to 25
-// sequential PriceCharting round-trips per category, ~50 total across
-// both categories per run — confirmed live this is slow enough to blow
-// past Vercel's serverless function timeout entirely (a real production
-// run timed out with no response at all after 60s). Fully unbounded
-// concurrency (all 25 at once) risks looking like abusive traffic to
-// PriceCharting's API instead, so this runs a bounded number of workers
-// pulling from a shared queue — parallel, but capped.
-async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let nextIndex = 0;
-  async function worker() {
-    while (nextIndex < items.length) {
-      const i = nextIndex++;
-      results[i] = await fn(items[i]);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-  return results;
-}
 
 const LOOKUP_CONCURRENCY = 6;
 

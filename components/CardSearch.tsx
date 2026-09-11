@@ -121,7 +121,7 @@ export default function CardSearch() {
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    PriceCharting reference (ungraded)
+                    Closest PriceCharting match for this search (ungraded)
                   </div>
                   <div className="font-medium" style={{ color: "var(--text-primary)" }}>{result.reference.productName}</div>
                   <div className="text-xl font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
@@ -148,6 +148,12 @@ export default function CardSearch() {
             )}
           </div>
 
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            A broad search (just a player name, say) can return listings for many different cards, not
+            copies of the one above — each listing below is checked against its own closest match, shown
+            under it, not necessarily the one above.
+          </p>
+
           <div className="flex flex-col gap-2">
             {result.listings.length === 0 && (
               <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
@@ -155,11 +161,8 @@ export default function CardSearch() {
               </p>
             )}
             {result.listings.map((listing) => (
-              <a
+              <div
                 key={listing.itemId}
-                href={listing.itemWebUrl}
-                target="_blank"
-                rel="noopener noreferrer"
                 className="rounded-lg p-3 flex gap-3 items-center"
                 style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
               >
@@ -168,9 +171,28 @@ export default function CardSearch() {
                   <img src={listing.imageUrl} alt="" className="w-14 h-14 rounded-md object-contain shrink-0" style={{ background: "#fff" }} />
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm" style={{ color: "var(--text-primary)" }}>{listing.title}</div>
+                  <a
+                    href={listing.itemWebUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm hover:underline"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {listing.title}
+                  </a>
                   {listing.condition && (
                     <div className="text-xs" style={{ color: "var(--text-muted)" }}>{listing.condition}</div>
+                  )}
+                  {listing.reference && (
+                    <a
+                      href={listing.reference.productUrl ?? listing.reference.itemWebUrl ?? listing.reference.ebaySearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs block mt-0.5"
+                      style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                    >
+                      vs ${listing.reference.ungradedPriceDollars.toFixed(2)} for &quot;{listing.reference.productName}&quot;
+                    </a>
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
@@ -183,7 +205,7 @@ export default function CardSearch() {
                     </span>
                   )}
                 </div>
-              </a>
+              </div>
             ))}
           </div>
         </>

@@ -2,6 +2,7 @@ import { findCard, buildProductUrl, type CardCategory, type CardReference } from
 import { searchListings, findReferenceListing, type EbayListing } from "@/lib/sources/ebay";
 import { saveNewFinds, type ReferenceInfo, type SavedFind } from "@/lib/db";
 import { extractSearchKeywords, extractSerialDenominator } from "@/lib/cardKeywords";
+import { mapWithConcurrency } from "@/lib/concurrency";
 
 export type { CardCategory };
 
@@ -38,6 +39,11 @@ export type CardListingResult = EbayListing & {
   priceDollars: number;
   percentBelowReference: number | null;
   isUnderpriced: boolean;
+  // This listing's OWN best-matching PriceCharting product — not the one
+  // product shown at the top of the page for the overall search query.
+  // See the comment on searchUnderpricedCards for why these can't be the
+  // same thing.
+  reference: ReferenceInfo | null;
 };
 
 export type CardSearchResult = {
@@ -91,12 +97,54 @@ export async function buildReferenceInfo(
   };
 }
 
+const LOOKUP_CONCURRENCY = 12;
+
 /**
- * `includeReferenceImage` costs one extra eBay API call and is only
- * worthwhile when the reference is actually going to be shown to someone
- * or saved — pass false to skip it (e.g. discovery's own per-listing
- * lookups build their own reference info directly, only for candidates
- * that already cleared the underpriced threshold).
+ * Checks one listing against its OWN best-matching PriceCharting product
+ * — never the single reference computed for the overall search query.
+ * This is the actual fix for a serious, reported-live bug: searching (or
+ * watching) a bare player name like "Luka doncic" returns listings
+ * spanning many completely different cards (a 2018 base Prizm, a 2024-25
+ * Obsidian Red Electric Etch parallel, etc.) — comparing all of them
+ * against one shared reference (whichever single product that broad
+ * query happened to match) produced nonsense: a real production example
+ * flagged a $29.99 2024-25 Obsidian parallel as "45% under reference"
+ * against a 2018 Prizm base card's $54.98 price, two unrelated products
+ * that only share a player's name.
+ *
+ * The eBay photo lookup inside buildReferenceInfo (one extra API call)
+ * only runs for listings that actually end up flagged underpriced —
+ * running it for all ~30 listings on every search would be needlessly
+ * expensive for the ones nobody will ever look twice at.
+ */
+async function evaluateListing(listing: EbayListing, category: CardCategory): Promise<CardListingResult> {
+  const priceDollars = listing.priceCents / 100;
+  const listingQuery = extractSearchKeywords(listing.title);
+
+  let reference: CardReference | null;
+  try {
+    reference = await findCard(listingQuery, category);
+  } catch {
+    reference = null;
+  }
+
+  if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) {
+    return { ...listing, priceDollars, percentBelowReference: null, isUnderpriced: false, reference: null };
+  }
+
+  const percentBelowReference = ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
+  const isUnderpriced = percentBelowReference >= UNDERPRICED_THRESHOLD_PERCENT;
+  const referenceInfo = await buildReferenceInfo(listingQuery, reference, category, isUnderpriced);
+
+  return { ...listing, priceDollars, percentBelowReference, isUnderpriced, reference: referenceInfo };
+}
+
+/**
+ * `includeReferenceImage` costs one extra eBay API call and only affects
+ * the top-of-page summary reference (the product matched for the overall
+ * `query`, shown for context) — pass false to skip it when that summary
+ * won't be displayed (e.g. the watchlist, which no longer uses it for
+ * the underpriced determination at all, see evaluateListing above).
  */
 export async function searchUnderpricedCards(
   query: string,
@@ -130,28 +178,23 @@ export async function searchUnderpricedCards(
   // "Red White & Blue Refractor" listings (a different, much cheaper
   // parallel) flagged as underpriced against it. Filtering the listings
   // themselves by the serial number closes this regardless of whether
-  // the query rewrite above succeeded.
+  // the query rewrite above succeeded. Now a secondary safety net rather
+  // than the primary fix — each listing gets its own accurate reference
+  // below regardless — but still worth keeping: it also trims the
+  // (now more expensive, since every listing gets its own PriceCharting
+  // lookup) list down before that work happens.
   const querySerial = extractSerialDenominator(query);
   if (querySerial) {
     const withSerial = ungradedListings.filter((l) => l.title.includes(querySerial));
     if (withSerial.length > 0) ungradedListings = withSerial;
   }
 
-  const referencePriceCents = reference?.ungradedPriceCents ?? null;
-
-  const listings: CardListingResult[] = ungradedListings.map((l) => {
-    const percentBelowReference =
-      referencePriceCents && referencePriceCents > 0
-        ? ((referencePriceCents - l.priceCents) / referencePriceCents) * 100
-        : null;
-
-    return {
-      ...l,
-      priceDollars: l.priceCents / 100,
-      percentBelowReference,
-      isUnderpriced: percentBelowReference != null && percentBelowReference >= UNDERPRICED_THRESHOLD_PERCENT,
-    };
-  });
+  // Each listing checked against its own match, not the shared `reference`
+  // below — see evaluateListing's doc comment for why that distinction is
+  // the actual fix for a real reported bug. Bounded concurrency for the
+  // same reason Discover uses it: sequential would be far too slow for a
+  // search returning up to 30 listings.
+  const listings = await mapWithConcurrency(ungradedListings, LOOKUP_CONCURRENCY, (l) => evaluateListing(l, category));
 
   // Best deals (most below reference) first, then everything else by price.
   listings.sort((a, b) => {
@@ -161,6 +204,9 @@ export async function searchUnderpricedCards(
     return a.priceDollars - b.priceDollars;
   });
 
+  // This is the *overall query's* best match, shown at the top of the
+  // page for context — not what any individual listing below is actually
+  // compared against anymore (each has its own, in `listings[].reference`).
   const referenceInfo = reference ? await buildReferenceInfo(effectiveQuery, reference, category, includeReferenceImage) : null;
 
   return {
@@ -177,9 +223,20 @@ export async function searchUnderpricedCards(
  * min) and an immediate on-add check (watchlist route's POST) — without
  * the latter, adding a card gives zero feedback until the next scheduled
  * run, up to 30 minutes of "did this even work?" with nothing to look at.
+ *
+ * Each saved find carries `l.reference` — that listing's own match from
+ * evaluateListing — not the watchlist entry's overall query match. This
+ * matters most exactly when the watchlist entry is broad (just a player
+ * name, e.g. "Luka doncic", not "2018 Panini Prizm Luka Doncic"): the
+ * listings returned span many different real cards, and using one shared
+ * reference for all of them was the reported bug this fixes (see
+ * evaluateListing's doc comment for the concrete numbers).
  */
 export async function checkCardAndSaveFinds(card: string, category: CardCategory): Promise<number> {
-  const result = await searchUnderpricedCards(card, category, true);
+  // The top-of-page summary reference (searchUnderpricedCards's own
+  // `reference`) is never shown here, so there's no reason to spend the
+  // extra eBay call fetching its photo.
+  const result = await searchUnderpricedCards(card, category, false);
   const candidates: SavedFind[] = result.listings
     .filter((l) => l.isUnderpriced)
     .map((l) => ({
@@ -193,7 +250,7 @@ export async function checkCardAndSaveFinds(card: string, category: CardCategory
       searchedFor: card,
       category,
       source: "watchlist",
-      reference: result.reference ?? undefined,
+      reference: l.reference ?? undefined,
       foundAt: new Date().toISOString(),
     }));
   return saveNewFinds(candidates);
