@@ -366,6 +366,42 @@ lookup (no known subject — falls back to a best-effort guess, or leaves
 the title unchanged if it can't tell), and the main search box / watchlist
 (only when the query itself carries a serial number).
 
+### PriceCharting result ranking — why it was matching the wrong card even with a good query
+
+Reported directly ("a lot of the cards I search there's a lot of
+mismatches") and confirmed live to be real and frequent, not rare edge
+cases: `findCard` (`lib/sources/pricecharting.ts`) used to just trust
+whatever PriceCharting's own `/products` search put first — but that
+ranking isn't reliably relevance-to-the-player. Two live examples that
+exposed this directly, with a good, already-cleaned query:
+
+- `"Ja Morant Select Concourse"` put a completely unrelated Brian Thomas
+  Jr. **football** card first. The real Ja Morant match existed in the
+  results — 5th place, not 1st.
+- `"Shohei Ohtani Topps Chrome"` (no year given) put a $492 2026 base
+  card ahead of his $89,688 2018 rookie.
+
+Fixed by scoring every candidate PriceCharting actually returned instead
+of trusting position 0: `relevanceScore` counts what fraction of the
+*query's own* words appear in each candidate's product+console name
+(deliberately not the reverse — a candidate naturally carries extra
+words, like year and set, that the query didn't ask for and shouldn't be
+penalized for), and `findCard` now picks whichever candidate scores
+highest. Confirmed live this promotes the real Ja Morant card to the
+top, and left the two Jalen Johnson/Cade Cunningham cases from the
+sections above correctly unaffected (checked all three again after
+shipping this fix, in the real app, not just the scoring function in
+isolation).
+
+**What this doesn't fix**: genuine query ambiguity. The Ohtani example
+has no year to go on, so several of his different-year Topps Chrome
+cards score identically — nothing server-side can resolve that without
+more specific input (the UI's own placeholder text already models
+this: "e.g. 2018 Panini Prizm Luka Doncic" includes a year for exactly
+this reason). Scoring fixes "matched a completely different player,"
+not "matched the right player's wrong year" when the query itself
+doesn't say which year.
+
 ## Stack
 
 - Next.js 16 (App Router) + TypeScript + Tailwind

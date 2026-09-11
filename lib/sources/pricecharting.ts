@@ -57,12 +57,60 @@ async function pcFetch(category: CardCategory, path: string, params: Record<stri
   return res.json();
 }
 
-/** Returns the best-matching card product for a free-text search, or null if nothing came back. */
+function tokenize(s: string): Set<string> {
+  return new Set(
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter((w) => w.length > 1)
+  );
+}
+
+// Fraction of the query's own words that actually appear in a candidate's
+// name — not the other way around, since a candidate naturally carries
+// extra words (year, set, subset) the query didn't ask for.
+function relevanceScore(query: string, productName: string, consoleName: string): number {
+  const queryTokens = tokenize(query);
+  if (queryTokens.size === 0) return 0;
+  const candidateTokens = tokenize(`${productName} ${consoleName}`);
+  let overlap = 0;
+  for (const t of queryTokens) if (candidateTokens.has(t)) overlap++;
+  return overlap / queryTokens.size;
+}
+
+/**
+ * Returns the best-matching card product for a free-text search, or null
+ * if nothing came back. Reported directly ("a lot of the cards I search
+ * ... comparisons aren't accurate") and confirmed live to be a real,
+ * frequent problem: this used to just trust whatever PriceCharting's own
+ * search put first — but that ranking isn't always relevance to the
+ * *player*. Two live examples: "Ja Morant Select Concourse" put an
+ * unrelated Brian Thomas Jr. **football** card first, with the real Ja
+ * Morant match buried in 5th place; "Shohei Ohtani Topps Chrome" (no year
+ * given) put a $492 2026 base card ahead of his $89,688 2018 rookie.
+ * Now scores every returned candidate by how much of the *query's own*
+ * text actually appears in it, and picks the best-scoring one instead of
+ * position 0 — confirmed live this promotes the real Ja Morant card to
+ * the top. Doesn't fix genuine ambiguity (the Ohtani case has no year to
+ * go on, so several different years' cards score identically) — nothing
+ * server-side can resolve that without more specific input.
+ */
 export async function findCard(query: string, category: CardCategory): Promise<CardReference | null> {
   const json = await pcFetch(category, "/products", { q: query });
   const products = Array.isArray(json?.products) ? json.products : [];
   if (products.length === 0) return null;
-  return mapProduct(products[0]);
+
+  let best = products[0];
+  let bestScore = -1;
+  for (const p of products) {
+    const score = relevanceScore(query, String(p["product-name"] ?? ""), String(p["console-name"] ?? ""));
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  return mapProduct(best);
 }
 
 const SITE_BASE_BY_CATEGORY: Record<CardCategory, string> = {
