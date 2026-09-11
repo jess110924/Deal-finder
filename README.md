@@ -390,11 +390,12 @@ A few things that made this trickier than it looks:
   Confirmed live: the same query now correctly returns "Jalen Johnson
   [Gold] #7" from the right product line.
 
-This is used in three places: Player Search's peer-check (has a known
-subject from the search box), Discover's per-listing PriceCharting
-lookup (no known subject — falls back to a best-effort guess, or leaves
-the title unchanged if it can't tell), and the main search box / watchlist
-(only when the query itself carries a serial number).
+This is used in two places today: Player Search's peer-check (has a
+known subject from the search box) and the main search box/watchlist's
+eBay listings search (only when the query itself carries a serial
+number). It no longer feeds `findCard`/PriceCharting anywhere — see
+"Why `extractSearchKeywords` no longer feeds `findCard`" further down
+for why that changed.
 
 ### PriceCharting result ranking — why it was matching the wrong card even with a good query
 
@@ -456,9 +457,11 @@ to reach the manual search and watchlist too, not a new one to invent.
 
 `evaluateListing` in `lib/cardComparison.ts` now does exactly what
 Discover's per-listing check does: for each listing, look up its own
-best-matching PriceCharting product (using the same `extractSearchKeywords`
-+ relevance-scored `findCard` already fixed above) and compute
-*that* listing's underpriced status against *its own* match.
+best-matching PriceCharting product (via relevance-scored `findCard`,
+fixed above — see "Why `extractSearchKeywords` no longer feeds
+`findCard`" below for why this is now the *raw* listing title, not a
+keyword-stripped version) and compute *that* listing's underpriced
+status against *its own* match.
 `searchUnderpricedCards`'s original single `findCard` call still runs —
 it's shown at the top of the manual search page as context for the
 overall query — but it no longer decides whether any individual listing
@@ -499,6 +502,50 @@ The manual search page also changed to reflect this: the listings list
 now shows each listing's own match beneath it ("vs $X for '...'", with
 its own PriceCharting link) rather than implying every row was checked
 against the box at the top of the page.
+
+### Why `extractSearchKeywords` no longer feeds `findCard`
+
+Reported directly, after the two fixes above were already live: searching
+`"Kyrie Irving 2025-26 Topps Inception Gold Electricity Mavericks /50"`
+returned a completely different card — a **2024 Panini Prizm Monopoly**
+Kyrie Irving — as the verify link, wrong set and wrong year entirely.
+
+The cause was the keyword-stripping step itself (the same
+`extractSearchKeywords` documented above), now working against the
+relevance-scoring fix rather than for it. Its allow-list only keeps a
+guessed subject + recognized `COLOR_WORDS`/`FINISH_WORDS` + the serial
+number — "Topps", "Inception", and "Electricity" aren't on either list,
+so they were silently dropped, leaving the query `"Kyrie Irving gold
+/50"`. Confirmed live, directly against the real API: that stripped
+query's top-scored candidate is the wrong 2024 Panini Prizm Monopoly
+card, while the **full, unstripped** query's top-scored candidate is the
+correct 2025 Topps Inception one — the relevance scorer had the right
+answer available the whole time, but the query-cleaning step upstream
+of it had already thrown away the words it needed to find it.
+
+This function predates relevance scoring — it was built specifically
+because `findCard` used to blindly trust PriceCharting's position-0
+result, so handing it a short, hand-curated query was the only lever
+available. Now that `findCard` scores every candidate against the
+query's own words instead, stripping the query down is pure downside:
+it can only remove disambiguating signal, never add any. Re-verified
+live against the original cases that motivated the stripping in the
+first place (a Jalen Johnson Noir auto, a Cade Cunningham Chrome
+refractor, a Ja Morant Select card) with the full, unstripped title —
+all three still match correctly with scoring alone.
+
+Fixed by passing the raw title/query straight to `findCard` at all
+three call sites that used it for PriceCharting matching:
+`evaluateListing` and `searchUnderpricedCards`'s top-of-page reference
+(`lib/cardComparison.ts`), and Discover's per-listing check
+(`lib/cardDiscovery.ts`). `extractSearchKeywords` itself wasn't
+deleted — it's still genuinely useful for narrowing **eBay's own**
+keyword search, which has no relevance scoring to fall back on:
+`searchUnderpricedCards`'s `effectiveQuery` (feeds `searchListings`,
+not `findCard`) and Player Search's peer-check (`comparePeerListings`
+in `lib/playerSearch.ts`) still use it for exactly that. The distinction
+that matters: strip the query for eBay's dumb keyword search, but never
+for PriceCharting's `findCard`, which can do its own disambiguation now.
 
 ## Stack
 

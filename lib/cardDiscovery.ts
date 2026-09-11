@@ -6,7 +6,6 @@ import {
   buildReferenceInfo,
   type CardCategory,
 } from "@/lib/cardComparison";
-import { extractSearchKeywords } from "@/lib/cardKeywords";
 import { saveNewFinds, type SavedFind } from "@/lib/db";
 import { mapWithConcurrency } from "@/lib/concurrency";
 
@@ -46,18 +45,18 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
   );
 
   const results = await mapWithConcurrency(toCheck, LOOKUP_CONCURRENCY, async (listing): Promise<SavedFind | null> => {
-    // Discover has no separately-known player name to anchor on (unlike
-    // Player Search, which gets it from the search box) — this can only
-    // go by whatever it can infer from the title itself, and quietly
-    // no-ops back to the full title when it can't confidently do that
-    // (see extractSearchKeywords). Confirmed live this matters: feeding
-    // PriceCharting a full messy title returned a rare autographed
-    // jersey matched against an unrelated $6.50 base card.
-    const query = extractSearchKeywords(listing.title);
-
+    // Looks up the raw listing title directly — findCard's relevance
+    // scoring (pricecharting.ts) picks the best-matching candidate out of
+    // everything the query returns, so it no longer needs a hand-trimmed
+    // query to avoid being fooled by position-0 results. An earlier
+    // version stripped the title down first (extractSearchKeywords); that
+    // predated the scoring fix and is now counterproductive — it discards
+    // set-name/parallel words the scorer needs, confirmed live on a
+    // reported Kyrie Irving mismatch (see cardComparison.ts's
+    // evaluateListing for the full example).
     let reference;
     try {
-      reference = await findCard(query, category);
+      reference = await findCard(listing.title, category);
     } catch {
       return null; // one bad PriceCharting lookup shouldn't kill the whole run
     }
@@ -67,7 +66,7 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
       ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
     if (percentBelowReference < DISCOVERY_THRESHOLD_PERCENT) return null;
 
-    const referenceInfo = await buildReferenceInfo(query, reference, category);
+    const referenceInfo = await buildReferenceInfo(listing.title, reference, category);
     return {
       itemId: listing.itemId,
       title: listing.title,

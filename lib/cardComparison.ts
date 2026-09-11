@@ -116,14 +116,26 @@ const LOOKUP_CONCURRENCY = 12;
  * only runs for listings that actually end up flagged underpriced —
  * running it for all ~30 listings on every search would be needlessly
  * expensive for the ones nobody will ever look twice at.
+ *
+ * Looks up the listing's OWN raw title, not an extractSearchKeywords-
+ * stripped version. That stripping predates findCard's relevance scoring
+ * (see pricecharting.ts) and is now counterproductive: it discards set-
+ * name/parallel words the scorer needs to disambiguate. Confirmed live —
+ * "Kyrie Irving 2025-26 Topps Inception Gold Electricity Mavericks /50"
+ * stripped down to "Kyrie Irving gold /50" matched a wrong 2024 Panini
+ * Prizm Monopoly card, while the full raw title correctly matches the
+ * real 2025 Topps Inception product. Re-tested the original cases that
+ * motivated the stripping (a Jalen Johnson Noir auto, a Cade Cunningham
+ * Chrome refractor, a Ja Morant Select card) with the full title +
+ * relevance scoring and all still matched correctly — the scorer alone
+ * now handles what the stripping used to.
  */
 async function evaluateListing(listing: EbayListing, category: CardCategory): Promise<CardListingResult> {
   const priceDollars = listing.priceCents / 100;
-  const listingQuery = extractSearchKeywords(listing.title);
 
   let reference: CardReference | null;
   try {
-    reference = await findCard(listingQuery, category);
+    reference = await findCard(listing.title, category);
   } catch {
     reference = null;
   }
@@ -134,7 +146,7 @@ async function evaluateListing(listing: EbayListing, category: CardCategory): Pr
 
   const percentBelowReference = ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
   const isUnderpriced = percentBelowReference >= UNDERPRICED_THRESHOLD_PERCENT;
-  const referenceInfo = await buildReferenceInfo(listingQuery, reference, category, isUnderpriced);
+  const referenceInfo = await buildReferenceInfo(listing.title, reference, category, isUnderpriced);
 
   return { ...listing, priceDollars, percentBelowReference, isUnderpriced, reference: referenceInfo };
 }
@@ -153,16 +165,25 @@ export async function searchUnderpricedCards(
 ): Promise<CardSearchResult> {
   // Only rewrite the query when it carries a print-run denominator
   // ("/150") — a strong, safe signal this is a pasted-in raw eBay title
-  // (reported directly: pasting a full eBay title into PriceCharting
-  // returns the wrong card) rather than a short deliberate search like
-  // "2018 Panini Prizm Luka Doncic". Rewriting the latter would risk
-  // dropping its year and matching the wrong season's card instead —
-  // gating on the serial number avoids that regression entirely, since a
-  // short deliberate query essentially never includes one.
+  // rather than a short deliberate search like "2018 Panini Prizm Luka
+  // Doncic". Rewriting the latter would risk dropping its year and
+  // matching the wrong season's card instead — gating on the serial
+  // number avoids that regression entirely, since a short deliberate
+  // query essentially never includes one. This still narrows what's sent
+  // to eBay's own listings search, which has no relevance scoring of its
+  // own to fall back on.
   const effectiveQuery = extractSerialDenominator(query) ? extractSearchKeywords(query) : query;
 
+  // The PriceCharting lookup, by contrast, gets the full raw query, not
+  // effectiveQuery — findCard's relevance scoring (pricecharting.ts) needs
+  // the set-name/parallel words that extractSearchKeywords strips out to
+  // disambiguate correctly. Confirmed live: stripping "Kyrie Irving
+  // 2025-26 Topps Inception Gold Electricity Mavericks /50" down to
+  // "Kyrie Irving gold /50" matched the wrong "2024 Panini Prizm
+  // Monopoly" card; the full query correctly matches the real "2025
+  // Topps Inception" product.
   const [reference, rawListings] = await Promise.all([
-    findCard(effectiveQuery, category),
+    findCard(query, category),
     searchListings(effectiveQuery, category),
   ]);
 
@@ -207,7 +228,7 @@ export async function searchUnderpricedCards(
   // This is the *overall query's* best match, shown at the top of the
   // page for context — not what any individual listing below is actually
   // compared against anymore (each has its own, in `listings[].reference`).
-  const referenceInfo = reference ? await buildReferenceInfo(effectiveQuery, reference, category, includeReferenceImage) : null;
+  const referenceInfo = reference ? await buildReferenceInfo(query, reference, category, includeReferenceImage) : null;
 
   return {
     query,
