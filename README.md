@@ -143,6 +143,36 @@ real search for 15-20+ cards sequentially would risk timing out) and
 just get picked up on the next scheduled run, same as any other add that
 happens to miss its instant check.
 
+#### Triaging a find: My Picks and Mismatches
+
+Requested directly, since a "Dismiss" button loses a find outright
+either way — reviewing a find has three real outcomes, not two: a real
+find you'll act on, a wrong match, or neither. Each find in the review
+queue now has three actions instead of one:
+
+- **✓ Save as pick** — checked and confirmed as an exact match and a
+  real deal. Moves the find into a separate **My Picks** section
+  (`lib/db.ts`'s `confirmFind`, stored under `card-confirmed`) instead of
+  disappearing.
+- **⚠ Flag mismatch** — checked and found to be comparing against the
+  wrong card. Moves it into a **Mismatches** section (`flagMismatch`,
+  stored under `card-mismatches`) instead of just losing it. This is
+  deliberate: every accuracy fix in this project so far started from one
+  concrete reported example (the Ja Morant/football-card mismatch, the
+  Luka Doncic/Obsidian shared-reference bug) — this turns "the data's
+  still wrong sometimes" from something that needs a screenshot into a
+  running, structured log of real failures to actually look at.
+- **Dismiss** — still there, for a find that's neither (not interested,
+  or price too high) and doesn't need to go anywhere.
+
+Both new actions also mark the find dismissed internally (same
+mechanism `dismissFind` already used), so a future scheduled check
+doesn't just re-add the same listing right back into the review queue
+after you've already triaged it. Both new sections have their own
+"Remove"/"Clear" action to take something back out once you're done
+with it (bought it, or the mismatch got fixed) — this doesn't undo the
+dismissal, so it won't reappear in the review queue either way.
+
 This needed two things the rest of the project doesn't use: an actual
 database, and a way to run checks on a schedule with nobody's browser
 open.
@@ -764,8 +794,9 @@ site is wide open without it.
 - `app/cards/page.tsx`, `components/CardSearch.tsx` — manual card search
 - `lib/cardComparison.ts` — eBay-vs-PriceCharting comparison + filtering
 - `lib/sources/pricecharting.ts`, `ebay.ts` — the two card data sources
-- `lib/db.ts` — Upstash Redis: watchlist, saved finds, dismissed-ids
+- `lib/db.ts` — Upstash Redis: watchlist, saved finds, My Picks, Mismatches, dismissed-ids
 - `components/CardWatchlist.tsx` — watchlist manager + saved-finds review UI
+- `app/api/cards/confirmed/route.ts`, `mismatches/route.ts` — My Picks / Mismatches endpoints
 - `app/api/cards/watchlist/bulk/route.ts` — bulk-add endpoint (no immediate check)
 - `app/api/cards/check-watchlist/route.ts` — the scheduled check endpoint
 - `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action

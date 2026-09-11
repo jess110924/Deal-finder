@@ -25,9 +25,13 @@ function getRedis(): Redis {
 const WATCHLIST_KEY = "card-watchlist";
 const FINDS_KEY = "card-finds";
 const DISMISSED_KEY = "card-dismissed-ids";
+const CONFIRMED_KEY = "card-confirmed";
+const MISMATCH_KEY = "card-mismatches";
 
 const MAX_FINDS = 200;
 const MAX_DISMISSED = 1000;
+const MAX_CONFIRMED = 500;
+const MAX_MISMATCHES = 200;
 
 export type WatchlistEntry = { name: string; category: CardCategory };
 
@@ -130,4 +134,78 @@ export async function dismissFind(itemId: string): Promise<void> {
     ),
     getRedis().set(DISMISSED_KEY, Array.from(dismissedIds).concat(itemId).slice(-MAX_DISMISSED)),
   ]);
+}
+
+export async function getConfirmedPicks(): Promise<SavedFind[]> {
+  return (await getRedis().get<SavedFind[]>(CONFIRMED_KEY)) ?? [];
+}
+
+export async function getMismatches(): Promise<SavedFind[]> {
+  return (await getRedis().get<SavedFind[]>(MISMATCH_KEY)) ?? [];
+}
+
+/**
+ * Moves a find out of the review queue and into your confirmed picks —
+ * for one you've personally checked and verified is an exact match and a
+ * real deal. Also remembered as dismissed, same as dismissFind, so a
+ * future scheduled check doesn't just re-add the same listing right back
+ * into the review queue.
+ */
+export async function confirmFind(itemId: string): Promise<SavedFind | null> {
+  const [existing, confirmed, dismissedIds] = await Promise.all([getFinds(), getConfirmedPicks(), getDismissedIds()]);
+  const find = existing.find((f) => f.itemId === itemId);
+  if (!find) return null;
+
+  await Promise.all([
+    getRedis().set(
+      FINDS_KEY,
+      existing.filter((f) => f.itemId !== itemId)
+    ),
+    getRedis().set(CONFIRMED_KEY, [find, ...confirmed].slice(0, MAX_CONFIRMED)),
+    getRedis().set(DISMISSED_KEY, Array.from(dismissedIds).concat(itemId).slice(-MAX_DISMISSED)),
+  ]);
+  return find;
+}
+
+/**
+ * Moves a find out of the review queue and into the mismatch list — for
+ * one you've checked and found to be a wrong match — instead of just
+ * losing it via a plain dismiss. Kept around specifically so real
+ * mismatch examples can be reviewed later to actually fix the matching
+ * logic, the same way every fix documented in this project so far
+ * started from one concrete reported example. Also remembered as
+ * dismissed, same reason as confirmFind.
+ */
+export async function flagMismatch(itemId: string): Promise<SavedFind | null> {
+  const [existing, mismatches, dismissedIds] = await Promise.all([getFinds(), getMismatches(), getDismissedIds()]);
+  const find = existing.find((f) => f.itemId === itemId);
+  if (!find) return null;
+
+  await Promise.all([
+    getRedis().set(
+      FINDS_KEY,
+      existing.filter((f) => f.itemId !== itemId)
+    ),
+    getRedis().set(MISMATCH_KEY, [find, ...mismatches].slice(0, MAX_MISMATCHES)),
+    getRedis().set(DISMISSED_KEY, Array.from(dismissedIds).concat(itemId).slice(-MAX_DISMISSED)),
+  ]);
+  return find;
+}
+
+/** Un-saves a confirmed pick. */
+export async function removeConfirmed(itemId: string): Promise<void> {
+  const confirmed = await getConfirmedPicks();
+  await getRedis().set(
+    CONFIRMED_KEY,
+    confirmed.filter((f) => f.itemId !== itemId)
+  );
+}
+
+/** Clears a mismatch entry once it's been reviewed/fixed. */
+export async function removeMismatch(itemId: string): Promise<void> {
+  const mismatches = await getMismatches();
+  await getRedis().set(
+    MISMATCH_KEY,
+    mismatches.filter((f) => f.itemId !== itemId)
+  );
 }

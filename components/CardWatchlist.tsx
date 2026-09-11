@@ -9,6 +9,8 @@ const CATEGORY_LABEL: Record<CardCategory, string> = { sports: "Sports", pokemon
 export default function CardWatchlist() {
   const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
   const [finds, setFinds] = useState<SavedFind[]>([]);
+  const [confirmed, setConfirmed] = useState<SavedFind[]>([]);
+  const [mismatches, setMismatches] = useState<SavedFind[]>([]);
   const [category, setCategory] = useState<CardCategory>("sports");
   const [newCard, setNewCard] = useState("");
   const [loading, setLoading] = useState(true);
@@ -23,13 +25,24 @@ export default function CardWatchlist() {
     setLoading(true);
     setError(null);
     try {
-      const [watchlistRes, findsRes] = await Promise.all([fetch("/api/cards/watchlist"), fetch("/api/cards/finds")]);
+      const [watchlistRes, findsRes, confirmedRes, mismatchesRes] = await Promise.all([
+        fetch("/api/cards/watchlist"),
+        fetch("/api/cards/finds"),
+        fetch("/api/cards/confirmed"),
+        fetch("/api/cards/mismatches"),
+      ]);
       const watchlistJson = await watchlistRes.json();
       const findsJson = await findsRes.json();
+      const confirmedJson = await confirmedRes.json();
+      const mismatchesJson = await mismatchesRes.json();
       if (!watchlistRes.ok) throw new Error(watchlistJson.error || "Failed to load watchlist.");
       if (!findsRes.ok) throw new Error(findsJson.error || "Failed to load saved finds.");
+      if (!confirmedRes.ok) throw new Error(confirmedJson.error || "Failed to load confirmed picks.");
+      if (!mismatchesRes.ok) throw new Error(mismatchesJson.error || "Failed to load mismatches.");
       setWatchlist(watchlistJson.watchlist ?? []);
       setFinds(findsJson.finds ?? []);
+      setConfirmed(confirmedJson.confirmed ?? []);
+      setMismatches(mismatchesJson.mismatches ?? []);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -134,6 +147,56 @@ export default function CardWatchlist() {
       }
     } catch (err) {
       setFinds(previous); // roll back the optimistic removal
+      setError((err as Error).message);
+    }
+  }
+
+  // Moves a find from the review queue into either "My Picks" (verified
+  // exact match + real deal) or "Mismatches" (verified wrong, kept for
+  // debugging) instead of just dismissing it and losing it.
+  async function triageFind(find: SavedFind, action: "confirm" | "flag") {
+    const previousFinds = finds;
+    const previousConfirmed = confirmed;
+    const previousMismatches = mismatches;
+    setFinds((prev) => prev.filter((f) => f.itemId !== find.itemId)); // optimistic
+    if (action === "confirm") setConfirmed((prev) => [find, ...prev]);
+    else setMismatches((prev) => [find, ...prev]);
+
+    try {
+      const res = await fetch("/api/cards/finds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: find.itemId, action }),
+      });
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error || `Request failed: ${res.status}`);
+      }
+    } catch (err) {
+      setFinds(previousFinds); // roll back
+      setConfirmed(previousConfirmed);
+      setMismatches(previousMismatches);
+      setError((err as Error).message);
+    }
+  }
+
+  async function removeFromList(itemId: string, list: "confirmed" | "mismatches") {
+    const isConfirmed = list === "confirmed";
+    const previous = isConfirmed ? confirmed : mismatches;
+    const setList = isConfirmed ? setConfirmed : setMismatches;
+    setList((prev) => prev.filter((f) => f.itemId !== itemId)); // optimistic
+    try {
+      const res = await fetch(`/api/cards/${list}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId }),
+      });
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error || `Request failed: ${res.status}`);
+      }
+    } catch (err) {
+      setList(previous); // roll back
       setError((err as Error).message);
     }
   }
@@ -296,6 +359,11 @@ export default function CardWatchlist() {
         <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
           Saved finds {finds.length > 0 && `(${finds.length})`}
         </h2>
+        <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
+          Review each one: if you check it and it&apos;s a real, exact-match deal, save it to My Picks below.
+          If the reference is actually the wrong card, flag it as a mismatch instead of just dismissing it —
+          that list gets used to actually fix the matching logic.
+        </p>
         {!loading && finds.length === 0 && (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
             Nothing found yet — checks run automatically; results will appear here.
@@ -354,8 +422,167 @@ export default function CardWatchlist() {
                 <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
                   {find.percentBelowReference.toFixed(0)}% under reference
                 </span>
+                <button
+                  onClick={() => triageFind(find, "confirm")}
+                  className="text-xs font-medium"
+                  style={{ color: "var(--good)" }}
+                >
+                  ✓ Save as pick
+                </button>
+                <button
+                  onClick={() => triageFind(find, "flag")}
+                  className="text-xs font-medium"
+                  style={{ color: "var(--critical)" }}
+                >
+                  ⚠ Flag mismatch
+                </button>
                 <button onClick={() => dismissFind(find.itemId)} className="text-xs" style={{ color: "var(--text-muted)" }}>
                   Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
+          My Picks {confirmed.length > 0 && `(${confirmed.length})`}
+        </h2>
+        <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
+          Finds you&apos;ve personally verified as an exact match and a real deal.
+        </p>
+        {!loading && confirmed.length === 0 && (
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            Nothing saved yet — use &quot;Save as pick&quot; on a find above once you&apos;ve checked it.
+          </p>
+        )}
+        <div className="flex flex-col gap-2">
+          {confirmed.map((find) => (
+            <div
+              key={find.itemId}
+              className="rounded-lg p-3 flex gap-3 items-center"
+              style={{ background: "var(--surface-1)", border: "1px solid var(--good)" }}
+            >
+              {find.imageUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={find.imageUrl} alt="" className="w-14 h-14 rounded-md object-contain shrink-0" style={{ background: "#fff" }} />
+              )}
+              <div className="flex-1 min-w-0">
+                <a
+                  href={find.itemWebUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm hover:underline"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {find.title}
+                </a>
+                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {find.category && `${CATEGORY_LABEL[find.category]} · `}
+                  {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
+                </div>
+                {find.reference && (
+                  <a
+                    href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs flex items-center gap-1 mt-1"
+                    style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                  >
+                    {find.reference.imageUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={find.reference.imageUrl} alt="" className="w-4 h-4 rounded object-contain" style={{ background: "#fff" }} />
+                    )}
+                    ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
+                  </a>
+                )}
+              </div>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <span className="font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
+                  ${find.priceDollars.toFixed(2)}
+                </span>
+                <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
+                  {find.percentBelowReference.toFixed(0)}% under reference
+                </span>
+                <button
+                  onClick={() => removeFromList(find.itemId, "confirmed")}
+                  className="text-xs"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
+          Mismatches {mismatches.length > 0 && `(${mismatches.length})`}
+        </h2>
+        <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
+          Finds you&apos;ve checked and found to be comparing against the wrong card. Kept here (not just
+          dismissed) so these can be reviewed to fix the matching logic — worth sharing the title and
+          reference shown below when reporting one.
+        </p>
+        {!loading && mismatches.length === 0 && (
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            None flagged — use &quot;Flag mismatch&quot; on a find above when the reference is wrong.
+          </p>
+        )}
+        <div className="flex flex-col gap-2">
+          {mismatches.map((find) => (
+            <div
+              key={find.itemId}
+              className="rounded-lg p-3 flex gap-3 items-center"
+              style={{ background: "var(--surface-1)", border: "1px solid var(--critical)" }}
+            >
+              {find.imageUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={find.imageUrl} alt="" className="w-14 h-14 rounded-md object-contain shrink-0" style={{ background: "#fff" }} />
+              )}
+              <div className="flex-1 min-w-0">
+                <a
+                  href={find.itemWebUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm hover:underline"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {find.title}
+                </a>
+                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {find.category && `${CATEGORY_LABEL[find.category]} · `}
+                  {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
+                </div>
+                {find.reference && (
+                  <a
+                    href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs flex items-center gap-1 mt-1"
+                    style={{ color: "var(--critical)", textDecoration: "underline" }}
+                  >
+                    {find.reference.imageUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={find.reference.imageUrl} alt="" className="w-4 h-4 rounded object-contain" style={{ background: "#fff" }} />
+                    )}
+                    Wrongly matched: ${find.reference.ungradedPriceDollars.toFixed(2)} for &quot;{find.reference.productName}&quot;
+                  </a>
+                )}
+              </div>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <span className="font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
+                  ${find.priceDollars.toFixed(2)}
+                </span>
+                <button
+                  onClick={() => removeFromList(find.itemId, "mismatches")}
+                  className="text-xs"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Clear
                 </button>
               </div>
             </div>
