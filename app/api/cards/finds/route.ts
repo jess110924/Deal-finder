@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) {
         return NextResponse.json({ error: "No PriceCharting reference found for this listing right now." }, { status: 502 });
       }
-      const referenceInfo = await buildReferenceInfo(reference, find.category, true, find.itemId);
+      const referenceInfo = await buildReferenceInfo(reference, find.category, false);
       const percentBelowReference =
         ((reference.ungradedPriceCents - find.priceDollars * 100) / reference.ungradedPriceCents) * 100;
       const updated = await updateFindReference(itemId, referenceInfo, percentBelowReference);

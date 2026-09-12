@@ -56,37 +56,33 @@ export type CardSearchResult = {
 export const UNDERPRICED_THRESHOLD_PERCENT = 20;
 
 /**
- * A real photo + link for this exact card, so it's obvious at a glance
- * whether whatever's being compared against is actually the right card.
- * `productUrl` (the reference's own PriceCharting/SportsCardsPro page) is
- * always populated — it's the primary "verify" link, since it's the
- * actual source the reference price came from. The eBay-sourced photo/
- * link only exist when PriceCharting linked an eBay catalog id (epid) for
- * this product — not every product has one (confirmed: newer/more-
- * searched cards tend to, older ones sometimes don't) — and
- * `ebaySearchUrl` is a secondary always-available fallback for those.
- *
- * The epid photo search is always built from the *product's own name*
- * (`reference.productName`/`consoleName`), never from the specific
- * listing's raw title — reported directly and confirmed live to be a
- * real bug, not theoretical: searching with a listing's own exact title
- * makes the epid-filtered search find that exact same listing back as
- * "the reference", which is not just unhelpful but actively wrong (it's
- * comparing a listing's photo against itself, not an independent
- * source). `excludeItemId` (pass the listing being evaluated, if any) is
- * a second, independent safety net against the same failure mode.
+ * A real link (and, for the search page's top summary only, a photo) for
+ * this exact card, so it's obvious whether whatever's being compared
+ * against is actually the right one. `productUrl` (the reference's own
+ * PriceCharting/SportsCardsPro page) is always populated — it's the
+ * actual source the reference price came from, and the only genuine way
+ * to verify this is the right card: PriceCharting's API has no image
+ * field at all, at any subscription tier (confirmed against their own
+ * API docs), so there's no such thing as "their photo" to fetch through
+ * it. `imageUrl`/`itemWebUrl` (when `includeImage` is on) are a
+ * *different, weaker* thing: an eBay listing that merely shares the same
+ * eBay catalog id as this product. Tried showing that next to every
+ * listing as a "verify" photo; removed again — it isn't actually
+ * PriceCharting's photo, and even after fixing it self-matching the
+ * listing being checked, it was still just an eBay photo mislabeled as a
+ * verification, not a real one. Kept only for the top-of-page summary
+ * reference, which isn't compared against one specific listing.
  */
 export async function buildReferenceInfo(
   reference: CardReference,
   category: CardCategory,
-  includeImage = true,
-  excludeItemId?: string
+  includeImage = true
 ): Promise<ReferenceInfo> {
   let imageUrl: string | null = null;
   let itemWebUrl: string | null = null;
   if (includeImage && reference.epid) {
     try {
-      const found = await findReferenceListing(`${reference.productName} ${reference.consoleName}`, reference.epid, excludeItemId);
+      const found = await findReferenceListing(`${reference.productName} ${reference.consoleName}`, reference.epid);
       imageUrl = found?.imageUrl ?? null;
       itemWebUrl = found?.itemWebUrl ?? null;
     } catch {
@@ -119,14 +115,18 @@ const LOOKUP_CONCURRENCY = 12;
  * against a 2018 Prizm base card's $54.98 price, two unrelated products
  * that only share a player's name.
  *
- * The eBay photo lookup inside buildReferenceInfo (one extra API call)
- * always runs for a listing that will actually be shown to a user in an
- * interactive search (`includeAllImages`) — requested directly: seeing
- * the reference's own photo next to the listing is how a user compares
- * them without opening a link. It stays gated to underpriced-only for
- * the unattended watchlist/discovery paths, where non-underpriced
- * listings are discarded immediately and never shown to anyone, so
- * fetching their photo would just be wasted API calls.
+ * Never fetches a per-listing reference photo (`buildReferenceInfo`'s
+ * `includeImage`) — tried this, and removed it again. It never actually
+ * was PriceCharting's own photo (their API has no image field, confirmed
+ * against their own docs, at every subscription tier) — it was always an
+ * eBay listing that happened to share the same catalog id, which turned
+ * out to almost always just be the exact listing being checked itself
+ * (self-matching, confirmed live). Fixed the self-match, but the result
+ * was still an eBay photo mislabeled as a PriceCharting verification,
+ * which isn't what "verify this is the right card" actually needs —
+ * removed rather than kept as a misleading feature. `productUrl` (always
+ * populated, see buildReferenceInfo) remains the real way to verify: a
+ * direct link to the actual PriceCharting/SportsCardsPro page.
  *
  * Looks up the listing's OWN raw title, not an extractSearchKeywords-
  * stripped version. That stripping predates findCard's relevance scoring
@@ -141,11 +141,7 @@ const LOOKUP_CONCURRENCY = 12;
  * relevance scoring and all still matched correctly — the scorer alone
  * now handles what the stripping used to.
  */
-async function evaluateListing(
-  listing: EbayListing,
-  category: CardCategory,
-  includeAllImages: boolean
-): Promise<CardListingResult> {
+async function evaluateListing(listing: EbayListing, category: CardCategory): Promise<CardListingResult> {
   const priceDollars = listing.priceCents / 100;
 
   let reference: CardReference | null;
@@ -161,7 +157,7 @@ async function evaluateListing(
 
   const percentBelowReference = ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
   const isUnderpriced = percentBelowReference >= UNDERPRICED_THRESHOLD_PERCENT;
-  const referenceInfo = await buildReferenceInfo(reference, category, includeAllImages || isUnderpriced, listing.itemId);
+  const referenceInfo = await buildReferenceInfo(reference, category, false);
 
   return { ...listing, priceDollars, percentBelowReference, isUnderpriced, reference: referenceInfo };
 }
@@ -172,19 +168,13 @@ async function evaluateListing(
  * `query`, shown for context) — pass false to skip it when that summary
  * won't be displayed (e.g. the watchlist, which no longer uses it for
  * the underpriced determination at all, see evaluateListing above).
- *
- * `includeAllListingImages` does the same for every individual listing's
- * own reference photo, not just the top summary — pass true for an
- * interactive search page where a user will actually look at each row
- * (so they can compare photos without opening a link), false for the
- * unattended watchlist/discovery checks where non-underpriced listings
- * are discarded and never shown to anyone.
+ * Individual listings never fetch a reference photo at all — see
+ * evaluateListing's doc comment for why that was removed entirely.
  */
 export async function searchUnderpricedCards(
   query: string,
   category: CardCategory,
-  includeReferenceImage = false,
-  includeAllListingImages = false
+  includeReferenceImage = false
 ): Promise<CardSearchResult> {
   // Only rewrite the query when it carries a print-run denominator
   // ("/150") — a strong, safe signal this is a pasted-in raw eBay title
@@ -238,9 +228,7 @@ export async function searchUnderpricedCards(
   // the actual fix for a real reported bug. Bounded concurrency for the
   // same reason Discover uses it: sequential would be far too slow for a
   // search returning up to 30 listings.
-  const listings = await mapWithConcurrency(ungradedListings, LOOKUP_CONCURRENCY, (l) =>
-    evaluateListing(l, category, includeAllListingImages)
-  );
+  const listings = await mapWithConcurrency(ungradedListings, LOOKUP_CONCURRENCY, (l) => evaluateListing(l, category));
 
   // Best deals (most below reference) first, then everything else by price.
   listings.sort((a, b) => {

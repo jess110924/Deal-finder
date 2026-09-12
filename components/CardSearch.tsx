@@ -179,66 +179,39 @@ export default function CardSearch() {
                     </div>
                   )}
                 </a>
-                <div className="p-3 flex gap-3">
+                <div className="p-3">
                   <a
-                    href={listing.reference?.productUrl ?? listing.reference?.itemWebUrl ?? listing.reference?.ebaySearchUrl}
+                    href={listing.itemWebUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex flex-col items-center gap-1 shrink-0"
-                    style={{ visibility: listing.reference ? "visible" : "hidden" }}
+                    className="text-base hover:underline"
+                    style={{ color: "var(--text-primary)" }}
                   >
-                    {listing.reference?.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={listing.reference.imageUrl}
-                        alt=""
-                        className="w-20 h-20 rounded-md object-contain"
-                        style={{ background: "#fff", border: "1px solid var(--series-1)" }}
-                      />
-                    ) : (
-                      <div
-                        className="w-20 h-20 rounded-md flex items-center justify-center text-[10px] text-center px-1"
-                        style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
-                      >
-                        No photo
-                      </div>
-                    )}
-                    <span className="text-[10px] leading-none" style={{ color: "var(--series-1)" }}>Verify</span>
+                    {listing.title}
                   </a>
-                  <div className="flex-1 min-w-0">
+                  {listing.condition && (
+                    <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{listing.condition}</div>
+                  )}
+                  {listing.reference && (
                     <a
-                      href={listing.itemWebUrl}
+                      href={listing.reference.productUrl ?? listing.reference.itemWebUrl ?? listing.reference.ebaySearchUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-base hover:underline"
-                      style={{ color: "var(--text-primary)" }}
+                      className="text-sm block mt-1"
+                      style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
                     >
-                      {listing.title}
+                      vs ${listing.reference.ungradedPriceDollars.toFixed(2)} for &quot;{listing.reference.productName}&quot;
                     </a>
-                    {listing.condition && (
-                      <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{listing.condition}</div>
-                    )}
-                    {listing.reference && (
-                      <a
-                        href={listing.reference.productUrl ?? listing.reference.itemWebUrl ?? listing.reference.ebaySearchUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm block mt-1"
-                        style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
-                      >
-                        vs ${listing.reference.ungradedPriceDollars.toFixed(2)} for &quot;{listing.reference.productName}&quot;
-                      </a>
-                    )}
-                    <div className="flex items-center gap-2 mt-1.5">
-                      <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
-                        ${listing.priceDollars.toFixed(2)}
+                  )}
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
+                      ${listing.priceDollars.toFixed(2)}
+                    </span>
+                    {listing.isUnderpriced && (
+                      <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
+                        {listing.percentBelowReference!.toFixed(0)}% under reference
                       </span>
-                      {listing.isUnderpriced && (
-                        <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                          {listing.percentBelowReference!.toFixed(0)}% under reference
-                        </span>
-                      )}
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>

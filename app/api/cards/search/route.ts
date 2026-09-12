@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const category: CardCategory = categoryParam === "pokemon" ? "pokemon" : "sports";
 
   try {
-    const result = await searchUnderpricedCards(query, category, true, true);
+    const result = await searchUnderpricedCards(query, category, true);
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

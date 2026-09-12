@@ -184,39 +184,23 @@ export type ReferenceListing = { imageUrl: string; itemWebUrl: string };
 
 /**
  * Finds one real, currently-listed eBay item matching a PriceCharting
- * product's `epid` (eBay catalog product id) — used to show an actual
- * photo of the exact reference card being compared against, so it's
- * obvious at a glance whether it's really the same card. eBay's Catalog
- * API (which would resolve an epid directly to a product photo without
- * needing a live listing) requires a permission scope this app's key
- * doesn't have (confirmed live: 403 "Insufficient permissions"); filtering
- * a normal Browse API search by epid works with the same basic scope
- * already used elsewhere and returns the exact matching product — verified
- * live against the Luka Doncic Prizm card, whose epid it returned exactly.
- *
- * `excludeItemId` skips a specific item from the results — critical when
- * the caller is trying to find a photo of a *different* listing to
- * compare against. Reported directly and confirmed live to be a real,
- * common bug, not theoretical: when the caller is checking one specific
- * eBay listing, passing that listing's own exact title as `query` here
- * makes the epid-filtered search find that exact same listing as its own
- * top (and often only) match — nothing beats an exact title for matching
- * itself. Checked live against a real 20-listing search: every single
- * time a "reference photo" was found, it was 100% the listing's own
- * photo/URL, not an independent one. Requesting a few extra results and
- * skipping the excluded id gives a real chance at a genuinely different
- * listing under the same epid instead.
+ * product's `epid` (eBay catalog product id) — used only for the search
+ * page's top-of-page summary photo now (per-listing/per-find reference
+ * photos were tried and removed — see buildReferenceInfo in
+ * lib/cardComparison.ts for why). eBay's Catalog API (which would resolve
+ * an epid directly to a product photo without needing a live listing)
+ * requires a permission scope this app's key doesn't have (confirmed
+ * live: 403 "Insufficient permissions"); filtering a normal Browse API
+ * search by epid works with the same basic scope already used elsewhere
+ * and returns the exact matching product — verified live against the
+ * Luka Doncic Prizm card, whose epid it returned exactly.
  */
-export async function findReferenceListing(
-  query: string,
-  epid: string,
-  excludeItemId?: string
-): Promise<ReferenceListing | null> {
+export async function findReferenceListing(query: string, epid: string): Promise<ReferenceListing | null> {
   const token = await getAccessToken();
 
   const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
   url.searchParams.set("q", query);
-  url.searchParams.set("limit", excludeItemId ? "10" : "1");
+  url.searchParams.set("limit", "1");
   url.searchParams.set("filter", `epid:{${epid}}`);
 
   const res = await fetch(url.toString(), {
@@ -228,8 +212,7 @@ export async function findReferenceListing(
   }
 
   const json = await res.json();
-  const items = (json?.itemSummaries ?? []) as Record<string, unknown>[];
-  const item = items.find((i) => !excludeItemId || String(i.itemId) !== excludeItemId);
+  const item = (json?.itemSummaries ?? [])[0] as Record<string, unknown> | undefined;
   if (!item) return null;
   const image = item.image as { imageUrl?: string } | undefined;
   if (!image?.imageUrl || !item.itemWebUrl) return null;

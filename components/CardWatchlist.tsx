@@ -25,40 +25,6 @@ function FindHeroPhoto({ find }: { find: SavedFind }) {
   );
 }
 
-// A small reference-photo thumbnail placed right next to the title/price
-// details below the hero photo — requested directly: the PriceCharting
-// reference's own photo shown next to the listing, so the two can be
-// compared by eye without opening the "Verify" link.
-function FindReferenceThumb({ find, borderColor }: { find: SavedFind; borderColor: string }) {
-  return (
-    <a
-      href={find.reference?.productUrl ?? find.reference?.itemWebUrl ?? find.reference?.ebaySearchUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex flex-col items-center gap-1 shrink-0"
-      style={{ visibility: find.reference ? "visible" : "hidden" }}
-    >
-      {find.reference?.imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={find.reference.imageUrl}
-          alt=""
-          className="w-20 h-20 rounded-md object-contain"
-          style={{ background: "#fff", border: `1px solid ${borderColor}` }}
-        />
-      ) : (
-        <div
-          className="w-20 h-20 rounded-md flex items-center justify-center text-[10px] text-center px-1"
-          style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
-        >
-          No photo
-        </div>
-      )}
-      <span className="text-[10px] leading-none" style={{ color: borderColor }}>Verify</span>
-    </a>
-  );
-}
-
 export default function CardWatchlist() {
   const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
   const [finds, setFinds] = useState<SavedFind[]>([]);
@@ -460,9 +426,8 @@ export default function CardWatchlist() {
               style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
             >
               <FindHeroPhoto find={find} />
-              <div className="p-3 flex gap-3">
-                <FindReferenceThumb find={find} borderColor="var(--series-1)" />
-                <div className="flex-1 min-w-0">
+              <div className="p-3">
+                <div className="min-w-0">
                   <a
                     href={find.itemWebUrl}
                     target="_blank"
@@ -553,9 +518,8 @@ export default function CardWatchlist() {
               style={{ background: "var(--surface-1)", border: "1px solid var(--good)" }}
             >
               <FindHeroPhoto find={find} />
-              <div className="p-3 flex gap-3">
-                <FindReferenceThumb find={find} borderColor="var(--good)" />
-                <div className="flex-1 min-w-0">
+              <div className="p-3">
+                <div className="min-w-0">
                   <a
                     href={find.itemWebUrl}
                     target="_blank"
@@ -624,9 +588,8 @@ export default function CardWatchlist() {
               style={{ background: "var(--surface-1)", border: "1px solid var(--critical)" }}
             >
               <FindHeroPhoto find={find} />
-              <div className="p-3 flex gap-3">
-                <FindReferenceThumb find={find} borderColor="var(--critical)" />
-                <div className="flex-1 min-w-0">
+              <div className="p-3">
+                <div className="min-w-0">
                   <a
                     href={find.itemWebUrl}
                     target="_blank"
