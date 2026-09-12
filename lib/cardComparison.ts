@@ -95,11 +95,18 @@ async function evaluateListing(listing: EbayListing, category: CardCategory): Pr
  * likely underpriced" even before their own comps are known, and a real
  * deal is exactly what this is trying to catch, not exhaustive coverage
  * of every listing that exists.
+ *
+ * `includeSummary` skips the *overall query's own* sold-comps lookup (an
+ * extra API call, shown at the top of the manual search page for
+ * context) — the watchlist's background check passes false here since
+ * `checkCardAndSaveFinds` never reads `result.soldComps` at all; that
+ * call was pure waste on every single automated check.
  */
 export async function searchUnderpricedCards(
   query: string,
   category: CardCategory,
-  maxListingsToEvaluate?: number
+  maxListingsToEvaluate?: number,
+  includeSummary = true
 ): Promise<CardSearchResult> {
   // Only rewrite the query when it carries a print-run denominator
   // ("/150") — a strong, safe signal this is a pasted-in raw eBay title
@@ -113,7 +120,7 @@ export async function searchUnderpricedCards(
   const effectiveQuery = extractSerialDenominator(query) ? extractSearchKeywords(query) : query;
 
   const [soldComps, rawListings] = await Promise.all([
-    getSoldComps(query, null).catch(() => null),
+    includeSummary ? getSoldComps(query, null).catch(() => null) : Promise.resolve(null),
     searchListings(effectiveQuery, category),
   ]);
 
@@ -181,7 +188,7 @@ const WATCHLIST_MAX_LISTINGS_PER_CHECK = 5;
  * once for the PriceCharting-based version of this same logic.
  */
 export async function checkCardAndSaveFinds(card: string, category: CardCategory): Promise<number> {
-  const result = await searchUnderpricedCards(card, category, WATCHLIST_MAX_LISTINGS_PER_CHECK);
+  const result = await searchUnderpricedCards(card, category, WATCHLIST_MAX_LISTINGS_PER_CHECK, false);
   const candidates: SavedFind[] = result.listings
     .filter((l) => l.isUnderpriced)
     .map((l) => ({
