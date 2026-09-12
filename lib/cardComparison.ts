@@ -1,6 +1,5 @@
-import { findCard, buildProductUrl, type CardCategory, type CardReference } from "@/lib/sources/pricecharting";
-import { searchListings, findReferenceListing, type EbayListing } from "@/lib/sources/ebay";
-import { saveNewFinds, type ReferenceInfo, type SavedFind } from "@/lib/db";
+import { searchListings, type EbayListing, type CardCategory } from "@/lib/sources/ebay";
+import { saveNewFinds, type SavedFind } from "@/lib/db";
 import { extractSearchKeywords, extractSerialDenominator, isBundle } from "@/lib/cardKeywords";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { getSoldComps, type SoldCompsSummary } from "@/lib/soldComps";
@@ -9,9 +8,9 @@ export type { CardCategory };
 export { isBundle };
 
 // Graded slabs (PSA 10, BGS 9.5, etc.) sell for multiples of a raw card's
-// price. PriceCharting's reference here is ungraded-only, so comparing a
-// graded listing against it would produce a false "great deal" — a PSA 10
-// priced "50% below" an ungraded reference isn't a deal, it's a mismatch.
+// price. Comparing a graded listing against an ungraded sold-comps
+// average would produce a false "great deal" — a PSA 10 priced "50%
+// below" an ungraded average isn't a deal, it's a mismatch.
 //
 // Filtered using eBay's own `condition` field (confirmed live: they
 // reliably return the literal string "Graded" vs "Ungraded" for trading
@@ -19,218 +18,109 @@ export { isBundle };
 // used a title regex requiring a grade number right after "PSA"/"BGS"/etc,
 // which missed titles like "PSA Graded Mint 9" (words in between) and let
 // graded slabs slip through undetected. The structured condition field
-// doesn't have that failure mode.
+// doesn't have that failure mode. (Sold comps themselves come from a
+// different API with no such structured field — see isLikelyGraded in
+// lib/sources/soldComps.ts for how those get filtered instead.)
 export function isGraded(condition: string | null): boolean {
   return (condition ?? "").toLowerCase().includes("graded") && !(condition ?? "").toLowerCase().includes("ungraded");
 }
 
 export type CardListingResult = EbayListing & {
   priceDollars: number;
+  // How far below the average recent eBay sold price this listing's
+  // asking price is. Field name kept as-is (not renamed to something
+  // like percentBelowAverageSold) since it's already the key ~200 finds
+  // in production Redis are stored under, with no migration path — what
+  // it's computed from changed (used to be a PriceCharting reference
+  // price; now it's soldComps.averageSoldPriceDollars) but the field
+  // itself didn't move.
   percentBelowReference: number | null;
   isUnderpriced: boolean;
-  // This listing's OWN best-matching PriceCharting product — not the one
-  // product shown at the top of the page for the overall search query.
-  // See the comment on searchUnderpricedCards for why these can't be the
-  // same thing.
-  reference: ReferenceInfo | null;
-  // Real recent eBay sold prices for this exact listing's title —
-  // independent of (and fetched regardless of whether there's) a
-  // PriceCharting match, since it's useful signal on its own. See
-  // getSoldComps in lib/soldComps.ts.
+  // Real recent eBay sold prices for this exact listing's title — the
+  // only comparison basis now. See getSoldComps in lib/soldComps.ts.
   soldComps: SoldCompsSummary | null;
 };
 
 export type CardSearchResult = {
   query: string;
   category: CardCategory;
-  reference: ReferenceInfo | null;
+  // The overall search query's own sold comps, shown at the top of the
+  // page for context — not what any individual listing below is
+  // compared against (each has its own, in `listings[].soldComps`, for
+  // the same reason described on evaluateListing).
+  soldComps: SoldCompsSummary | null;
   listings: CardListingResult[];
 };
 
 export const UNDERPRICED_THRESHOLD_PERCENT = 20;
 
-/**
- * A real link (and, for the search page's top summary only, a photo) for
- * this exact card, so it's obvious whether whatever's being compared
- * against is actually the right one. `productUrl` (the reference's own
- * PriceCharting/SportsCardsPro page) is always populated — it's the
- * actual source the reference price came from, and the only genuine way
- * to verify this is the right card: PriceCharting's API has no image
- * field at all, at any subscription tier (confirmed against their own
- * API docs), so there's no such thing as "their photo" to fetch through
- * it. `imageUrl`/`itemWebUrl` (when `includeImage` is on) are a
- * *different, weaker* thing: an eBay listing that merely shares the same
- * eBay catalog id as this product. Tried showing that next to every
- * listing as a "verify" photo; removed again — it isn't actually
- * PriceCharting's photo, and even after fixing it self-matching the
- * listing being checked, it was still just an eBay photo mislabeled as a
- * verification, not a real one. Kept only for the top-of-page summary
- * reference, which isn't compared against one specific listing.
- */
-export async function buildReferenceInfo(
-  reference: CardReference,
-  category: CardCategory,
-  includeImage = true
-): Promise<ReferenceInfo> {
-  let imageUrl: string | null = null;
-  let itemWebUrl: string | null = null;
-  if (includeImage && reference.epid) {
-    try {
-      const found = await findReferenceListing(`${reference.productName} ${reference.consoleName}`, reference.epid);
-      imageUrl = found?.imageUrl ?? null;
-      itemWebUrl = found?.itemWebUrl ?? null;
-    } catch {
-      // Not worth failing the whole thing over — ebaySearchUrl/productUrl
-      // below still give a way to double-check the reference by hand.
-    }
-  }
-  return {
-    productName: reference.productName,
-    ungradedPriceDollars: (reference.ungradedPriceCents ?? 0) / 100,
-    imageUrl,
-    itemWebUrl,
-    ebaySearchUrl: `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(reference.productName + " " + reference.consoleName)}`,
-    productUrl: buildProductUrl(reference, category),
-  };
-}
-
 const LOOKUP_CONCURRENCY = 12;
 
 /**
- * Checks one listing against its OWN best-matching PriceCharting product
- * — never the single reference computed for the overall search query.
- * This is the actual fix for a serious, reported-live bug: searching (or
- * watching) a bare player name like "Luka doncic" returns listings
- * spanning many completely different cards (a 2018 base Prizm, a 2024-25
- * Obsidian Red Electric Etch parallel, etc.) — comparing all of them
- * against one shared reference (whichever single product that broad
- * query happened to match) produced nonsense: a real production example
- * flagged a $29.99 2024-25 Obsidian parallel as "45% under reference"
- * against a 2018 Prizm base card's $54.98 price, two unrelated products
- * that only share a player's name.
- *
- * Never fetches a per-listing reference photo (`buildReferenceInfo`'s
- * `includeImage`) — tried this, and removed it again. It never actually
- * was PriceCharting's own photo (their API has no image field, confirmed
- * against their own docs, at every subscription tier) — it was always an
- * eBay listing that happened to share the same catalog id, which turned
- * out to almost always just be the exact listing being checked itself
- * (self-matching, confirmed live). Fixed the self-match, but the result
- * was still an eBay photo mislabeled as a PriceCharting verification,
- * which isn't what "verify this is the right card" actually needs —
- * removed rather than kept as a misleading feature. `productUrl` (always
- * populated, see buildReferenceInfo) remains the real way to verify: a
- * direct link to the actual PriceCharting/SportsCardsPro page.
- *
- * Looks up the listing's OWN raw title, not an extractSearchKeywords-
- * stripped version. That stripping predates findCard's relevance scoring
- * (see pricecharting.ts) and is now counterproductive: it discards set-
- * name/parallel words the scorer needs to disambiguate. Confirmed live —
- * "Kyrie Irving 2025-26 Topps Inception Gold Electricity Mavericks /50"
- * stripped down to "Kyrie Irving gold /50" matched a wrong 2024 Panini
- * Prizm Monopoly card, while the full raw title correctly matches the
- * real 2025 Topps Inception product. Re-tested the original cases that
- * motivated the stripping (a Jalen Johnson Noir auto, a Cade Cunningham
- * Chrome refractor, a Ja Morant Select card) with the full title +
- * relevance scoring and all still matched correctly — the scorer alone
- * now handles what the stripping used to.
- *
- * Real eBay sold comps (getSoldComps, lib/soldComps.ts) are looked up
- * alongside the PriceCharting match, not gated behind it succeeding —
- * requested directly ("I want all searches to have sold comps"), and
- * sold history is useful on its own even when there's no PriceCharting
- * product match for this listing. Run in parallel with findCard (not
- * after it) so this doesn't add extra latency on top of the existing
- * lookup — the two are independent network calls to unrelated services.
+ * Checks one listing against its OWN recent sold comps — never a single
+ * comps figure computed for the overall search query. This is the same
+ * fix, for the same reason, as the PriceCharting-era bug this project
+ * fixed earlier: searching (or watching) a bare player name like "Luka
+ * doncic" returns listings spanning many completely different cards (a
+ * 2018 base Prizm, a 2024-25 Obsidian Red Electric Etch parallel, etc.)
+ * — comparing all of them against one shared reference (whichever single
+ * figure a broad query happened to produce) produces nonsense. Each
+ * listing needs its own comps, computed from its own specific title.
  */
 async function evaluateListing(listing: EbayListing, category: CardCategory): Promise<CardListingResult> {
   const priceDollars = listing.priceCents / 100;
+  const soldComps = await getSoldComps(listing.title, priceDollars).catch(() => null);
 
-  const [reference, soldComps] = await Promise.all([
-    findCard(listing.title, category).catch(() => null),
-    getSoldComps(listing.title, priceDollars).catch(() => null),
-  ]);
-
-  if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) {
-    return { ...listing, priceDollars, percentBelowReference: null, isUnderpriced: false, reference: null, soldComps };
+  if (!soldComps || soldComps.averageSoldPriceDollars <= 0) {
+    return { ...listing, priceDollars, percentBelowReference: null, isUnderpriced: false, soldComps: null };
   }
 
-  const percentBelowReference = ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
+  const percentBelowReference = soldComps.percentBelowAverage ?? 0;
   const isUnderpriced = percentBelowReference >= UNDERPRICED_THRESHOLD_PERCENT;
-  const referenceInfo = await buildReferenceInfo(reference, category, false);
 
-  return { ...listing, priceDollars, percentBelowReference, isUnderpriced, reference: referenceInfo, soldComps };
+  return { ...listing, priceDollars, percentBelowReference, isUnderpriced, soldComps };
 }
 
-/**
- * `includeReferenceImage` costs one extra eBay API call and only affects
- * the top-of-page summary reference (the product matched for the overall
- * `query`, shown for context) — pass false to skip it when that summary
- * won't be displayed (e.g. the watchlist, which no longer uses it for
- * the underpriced determination at all, see evaluateListing above).
- * Individual listings never fetch a reference photo at all — see
- * evaluateListing's doc comment for why that was removed entirely.
- */
-export async function searchUnderpricedCards(
-  query: string,
-  category: CardCategory,
-  includeReferenceImage = false
-): Promise<CardSearchResult> {
+export async function searchUnderpricedCards(query: string, category: CardCategory): Promise<CardSearchResult> {
   // Only rewrite the query when it carries a print-run denominator
   // ("/150") — a strong, safe signal this is a pasted-in raw eBay title
   // rather than a short deliberate search like "2018 Panini Prizm Luka
   // Doncic". Rewriting the latter would risk dropping its year and
   // matching the wrong season's card instead — gating on the serial
   // number avoids that regression entirely, since a short deliberate
-  // query essentially never includes one. This still narrows what's sent
-  // to eBay's own listings search, which has no relevance scoring of its
+  // query essentially never includes one. This narrows what's sent to
+  // eBay's own listings search, which has no relevance scoring of its
   // own to fall back on.
   const effectiveQuery = extractSerialDenominator(query) ? extractSearchKeywords(query) : query;
 
-  // The PriceCharting lookup, by contrast, gets the full raw query, not
-  // effectiveQuery — findCard's relevance scoring (pricecharting.ts) needs
-  // the set-name/parallel words that extractSearchKeywords strips out to
-  // disambiguate correctly. Confirmed live: stripping "Kyrie Irving
-  // 2025-26 Topps Inception Gold Electricity Mavericks /50" down to
-  // "Kyrie Irving gold /50" matched the wrong "2024 Panini Prizm
-  // Monopoly" card; the full query correctly matches the real "2025
-  // Topps Inception" product.
-  const [reference, rawListings] = await Promise.all([
-    findCard(query, category),
+  const [soldComps, rawListings] = await Promise.all([
+    getSoldComps(query, null).catch(() => null),
     searchListings(effectiveQuery, category),
   ]);
 
   let ungradedListings = rawListings.filter((l) => !isGraded(l.condition) && !isBundle(l.title));
 
-  // Rewriting the query only helps when a subject can be confidently
-  // guessed (see extractSearchKeywords) — plenty of real titles start
-  // with the year instead of the player, where it can't, and the
-  // listings search then stays as loose as the raw title. Confirmed live
-  // this lets the wrong parallel through even after the fix above: a
-  // search for "...Cade Cunningham #88 Blue Refractor /150..." correctly
-  // matched the right PriceCharting product ($34.99) but still returned
-  // "Red White & Blue Refractor" listings (a different, much cheaper
-  // parallel) flagged as underpriced against it. Filtering the listings
-  // themselves by the serial number closes this regardless of whether
-  // the query rewrite above succeeded. Now a secondary safety net rather
-  // than the primary fix — each listing gets its own accurate reference
-  // below regardless — but still worth keeping: it also trims the
-  // (now more expensive, since every listing gets its own PriceCharting
-  // lookup) list down before that work happens.
+  // Filtering listings by the query's own print-run denominator closes a
+  // gap the query-rewrite above doesn't: a search for "...Cade Cunningham
+  // #88 Blue Refractor /150..." can still return "Red White & Blue
+  // Refractor" listings (a different, much cheaper parallel) alongside
+  // the real ones. Now a secondary safety net rather than the primary
+  // fix — each listing gets its own accurate sold comps below regardless
+  // — but still worth keeping: it trims the list down before that
+  // (per-listing) work happens.
   const querySerial = extractSerialDenominator(query);
   if (querySerial) {
     const withSerial = ungradedListings.filter((l) => l.title.includes(querySerial));
     if (withSerial.length > 0) ungradedListings = withSerial;
   }
 
-  // Each listing checked against its own match, not the shared `reference`
-  // below — see evaluateListing's doc comment for why that distinction is
-  // the actual fix for a real reported bug. Bounded concurrency for the
-  // same reason Discover uses it: sequential would be far too slow for a
-  // search returning up to 30 listings.
+  // Each listing checked against its own comps, not the shared `soldComps`
+  // above — see evaluateListing's doc comment for why. Bounded
+  // concurrency for the same reason Discover uses it: sequential would
+  // be far too slow for a search returning up to 30 listings.
   const listings = await mapWithConcurrency(ungradedListings, LOOKUP_CONCURRENCY, (l) => evaluateListing(l, category));
 
-  // Best deals (most below reference) first, then everything else by price.
+  // Best deals (most below average sold price) first, then everything else by price.
   listings.sort((a, b) => {
     if (a.percentBelowReference != null && b.percentBelowReference != null) {
       return b.percentBelowReference - a.percentBelowReference;
@@ -238,17 +128,7 @@ export async function searchUnderpricedCards(
     return a.priceDollars - b.priceDollars;
   });
 
-  // This is the *overall query's* best match, shown at the top of the
-  // page for context — not what any individual listing below is actually
-  // compared against anymore (each has its own, in `listings[].reference`).
-  const referenceInfo = reference ? await buildReferenceInfo(reference, category, includeReferenceImage) : null;
-
-  return {
-    query,
-    category,
-    reference: referenceInfo,
-    listings,
-  };
+  return { query, category, soldComps, listings };
 }
 
 /**
@@ -258,19 +138,16 @@ export async function searchUnderpricedCards(
  * the latter, adding a card gives zero feedback until the next scheduled
  * run, up to 30 minutes of "did this even work?" with nothing to look at.
  *
- * Each saved find carries `l.reference` — that listing's own match from
- * evaluateListing — not the watchlist entry's overall query match. This
+ * Each saved find carries `l.soldComps` — that listing's own comps from
+ * evaluateListing — not the watchlist entry's overall query comps. This
  * matters most exactly when the watchlist entry is broad (just a player
  * name, e.g. "Luka doncic", not "2018 Panini Prizm Luka Doncic"): the
  * listings returned span many different real cards, and using one shared
- * reference for all of them was the reported bug this fixes (see
- * evaluateListing's doc comment for the concrete numbers).
+ * figure for all of them would repeat a bug this project already fixed
+ * once for the PriceCharting-based version of this same logic.
  */
 export async function checkCardAndSaveFinds(card: string, category: CardCategory): Promise<number> {
-  // The top-of-page summary reference (searchUnderpricedCards's own
-  // `reference`) is never shown here, so there's no reason to spend the
-  // extra eBay call fetching its photo.
-  const result = await searchUnderpricedCards(card, category, false);
+  const result = await searchUnderpricedCards(card, category);
   const candidates: SavedFind[] = result.listings
     .filter((l) => l.isUnderpriced)
     .map((l) => ({
@@ -284,7 +161,6 @@ export async function checkCardAndSaveFinds(card: string, category: CardCategory
       searchedFor: card,
       category,
       source: "watchlist",
-      reference: l.reference ?? undefined,
       soldComps: l.soldComps ?? undefined,
       foundAt: new Date().toISOString(),
     }));

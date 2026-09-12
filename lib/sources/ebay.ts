@@ -55,14 +55,16 @@ export type EbayListing = {
   condition: string | null;
 };
 
+export type CardCategory = "sports" | "pokemon";
+
 // Confirmed live by searching "charizard pokemon card" with no category
 // filter and inspecting what categories real listings actually fall
 // under — single Pokemon (and other CCG) cards land in "CCG Individual
 // Cards", a sibling of "Sports Trading Cards", not a child of it.
-const CATEGORY_ID_BY_CARD_CATEGORY = {
+const CATEGORY_ID_BY_CARD_CATEGORY: Record<CardCategory, string> = {
   sports: "212", // "Sports Trading Cards"
   pokemon: "183454", // "CCG Individual Cards"
-} as const;
+};
 
 function mapItemSummary(item: Record<string, unknown>): EbayListing {
   const price = item.price as { value?: string; currency?: string } | undefined;
@@ -87,7 +89,7 @@ export type SearchListingsOptions = {
 
 export async function searchListings(
   query: string,
-  category: keyof typeof CATEGORY_ID_BY_CARD_CATEGORY,
+  category: CardCategory,
   options: SearchListingsOptions = {}
 ): Promise<EbayListing[]> {
   const { limit = 30, minPriceDollars, maxPriceDollars, sort } = options;
@@ -136,7 +138,7 @@ export async function searchListings(
 // Cards (212) didn't show this problem in testing (results were plain
 // football/baseball/hockey/soccer — all genuinely sports), so it doesn't
 // need one.
-const BROWSE_KEYWORD_BY_CATEGORY: Record<keyof typeof CATEGORY_ID_BY_CARD_CATEGORY, string | null> = {
+const BROWSE_KEYWORD_BY_CATEGORY: Record<CardCategory, string | null> = {
   sports: null,
   pokemon: "pokemon",
 };
@@ -147,14 +149,13 @@ const BROWSE_KEYWORD_BY_CATEGORY: Record<keyof typeof CATEGORY_ID_BY_CARD_CATEGO
  * newest-listed within a $20-$300 price band: unrestricted-by-price
  * browsing (tried live first) surfaced near-worthless base commons at the
  * cheap end, and sorting by price descending surfaced ultra-rare
- * autographs/jerseys/1-of-1s at the expensive end that PriceCharting's
- * catalog doesn't cover well (every single one came back matched against
- * a wildly lower, clearly-wrong reference price in testing) — this band
- * targets the standard rookie/parallel cards PriceCharting's catalog
- * actually covers well.
+ * autographs/jerseys/1-of-1s at the expensive end with too little real
+ * sold history to compare against reliably — this band targets the
+ * standard rookie/parallel cards that actually have enough recent sold
+ * comps to judge.
  */
 export async function browseCategory(
-  category: keyof typeof CATEGORY_ID_BY_CARD_CATEGORY,
+  category: CardCategory,
   limit = 25
 ): Promise<EbayListing[]> {
   const token = await getAccessToken();
@@ -180,41 +181,3 @@ export async function browseCategory(
   return items.map(mapItemSummary);
 }
 
-export type ReferenceListing = { imageUrl: string; itemWebUrl: string };
-
-/**
- * Finds one real, currently-listed eBay item matching a PriceCharting
- * product's `epid` (eBay catalog product id) — used only for the search
- * page's top-of-page summary photo now (per-listing/per-find reference
- * photos were tried and removed — see buildReferenceInfo in
- * lib/cardComparison.ts for why). eBay's Catalog API (which would resolve
- * an epid directly to a product photo without needing a live listing)
- * requires a permission scope this app's key doesn't have (confirmed
- * live: 403 "Insufficient permissions"); filtering a normal Browse API
- * search by epid works with the same basic scope already used elsewhere
- * and returns the exact matching product — verified live against the
- * Luka Doncic Prizm card, whose epid it returned exactly.
- */
-export async function findReferenceListing(query: string, epid: string): Promise<ReferenceListing | null> {
-  const token = await getAccessToken();
-
-  const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
-  url.searchParams.set("q", query);
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("filter", `epid:{${epid}}`);
-
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
-    next: { revalidate: 3600 }, // this is just an illustrative photo, not a price — cache like the reference price itself
-  });
-  if (!res.ok) {
-    throw new Error(`eBay epid lookup failed: ${res.status} ${res.statusText}`);
-  }
-
-  const json = await res.json();
-  const item = (json?.itemSummaries ?? [])[0] as Record<string, unknown> | undefined;
-  if (!item) return null;
-  const image = item.image as { imageUrl?: string } | undefined;
-  if (!image?.imageUrl || !item.itemWebUrl) return null;
-  return { imageUrl: image.imageUrl, itemWebUrl: String(item.itemWebUrl) };
-}

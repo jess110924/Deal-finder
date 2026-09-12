@@ -1,10 +1,10 @@
 /**
  * Runs `fn` over `items` with at most `concurrency` in flight at once —
  * parallel, but capped. Fully sequential (one at a time) is too slow for
- * anything checking more than a handful of listings against PriceCharting
- * (confirmed live: it was slow enough to blow past Vercel's serverless
- * function timeout outright); fully unbounded concurrency risks looking
- * like abusive traffic to PriceCharting's API instead. A small fixed
+ * anything checking more than a handful of listings against an external
+ * API (confirmed live: it was slow enough to blow past Vercel's
+ * serverless function timeout outright); fully unbounded concurrency
+ * risks looking like abusive traffic to that API instead. A small fixed
  * number of workers pulling from a shared queue is the middle ground.
  */
 export async function mapWithConcurrency<T, R>(

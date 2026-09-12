@@ -5,10 +5,10 @@ import type { CardCategory } from "@/lib/cardComparison";
 /**
  * Adds many cards at once, all under the same category. Deliberately skips
  * the immediate per-card check that the single-add route (POST
- * /api/cards/watchlist) does — running that eBay + PriceCharting search
- * for 15-20 cards sequentially would risk a serverless function timeout.
- * These just get picked up by the next scheduled run instead (see
- * check-watchlist route + the GitHub Action).
+ * /api/cards/watchlist) does — running that eBay search + sold-comps
+ * check for 15-20 cards sequentially would risk a serverless function
+ * timeout. These just get picked up by the next scheduled run instead
+ * (see check-watchlist route + the GitHub Action).
  */
 export async function POST(request: NextRequest) {
   try {

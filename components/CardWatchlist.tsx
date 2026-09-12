@@ -26,9 +26,10 @@ function FindHeroPhoto({ find }: { find: SavedFind }) {
 }
 
 // Shared by Saved finds / My Picks / Mismatches — real recent eBay sold
-// prices for this exact title, independent of the PriceCharting
-// reference above it. Requested directly: "I want all searches to have
-// sold comps verify link and average of eBay sold listings."
+// prices for this exact title, the only comparison basis now that
+// PriceCharting has been removed entirely. Requested directly: "I want
+// all searches to have sold comps verify link and average of eBay sold
+// listings" / "remove the sportscardpro stuff."
 function SoldCompsLine({ find }: { find: SavedFind }) {
   if (!find.soldComps) return null;
   return (
@@ -339,7 +340,7 @@ export default function CardWatchlist() {
         </form>
         {checking && (
           <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
-            Running an eBay + PriceCharting search now — this part takes a few seconds.
+            Running an eBay search + sold-comps check now — this part takes a few seconds.
           </p>
         )}
 
@@ -430,8 +431,8 @@ export default function CardWatchlist() {
         </h2>
         <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
           Review each one: if you check it and it&apos;s a real, exact-match deal, save it to My Picks below.
-          If the reference is actually the wrong card, flag it as a mismatch instead of just dismissing it —
-          that list gets used to actually fix the matching logic.
+          If the sold comps are actually for the wrong card, flag it as a mismatch instead of just
+          dismissing it — that list gets used to actually fix the matching logic.
         </p>
         {!loading && finds.length === 0 && (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
@@ -461,22 +462,6 @@ export default function CardWatchlist() {
                     {find.category && `${CATEGORY_LABEL[find.category]} · `}
                     {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                   </div>
-                  {find.reference && (
-                    <a
-                      // productUrl (the reference's own PriceCharting/
-                      // SportsCardsPro page) is the primary target — it's
-                      // the actual source the reference price came from.
-                      // Older saved finds predate this field, so fall back
-                      // to the eBay-sourced links for those.
-                      href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm block mt-1"
-                      style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
-                    >
-                      Verify: ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
-                    </a>
-                  )}
                   <SoldCompsLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
@@ -554,24 +539,13 @@ export default function CardWatchlist() {
                     {find.category && `${CATEGORY_LABEL[find.category]} · `}
                     {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                   </div>
-                  {find.reference && (
-                    <a
-                      href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm block mt-1"
-                      style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
-                    >
-                      ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
-                    </a>
-                  )}
                   <SoldCompsLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                       ${find.priceDollars.toFixed(2)}
                     </span>
                     <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                      {find.percentBelowReference.toFixed(0)}% under reference
+                      {find.percentBelowReference.toFixed(0)}% under average sold
                     </span>
                     <button
                       onClick={() => removeFromList(find.itemId, "confirmed")}
@@ -595,11 +569,11 @@ export default function CardWatchlist() {
         <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
           Finds you&apos;ve checked and found to be comparing against the wrong card. Kept here (not just
           dismissed) so these can be reviewed to fix the matching logic — worth sharing the title and
-          reference shown below when reporting one.
+          sold comps shown below when reporting one.
         </p>
         {!loading && mismatches.length === 0 && (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            None flagged — use &quot;Flag mismatch&quot; on a find above when the reference is wrong.
+            None flagged — use &quot;Flag mismatch&quot; on a find above when the sold comps are wrong.
           </p>
         )}
         <div className="flex flex-col gap-2">
@@ -625,17 +599,6 @@ export default function CardWatchlist() {
                     {find.category && `${CATEGORY_LABEL[find.category]} · `}
                     {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                   </div>
-                  {find.reference && (
-                    <a
-                      href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm block mt-1"
-                      style={{ color: "var(--critical)", textDecoration: "underline" }}
-                    >
-                      Wrongly matched: ${find.reference.ungradedPriceDollars.toFixed(2)} for &quot;{find.reference.productName}&quot;
-                    </a>
-                  )}
                   <SoldCompsLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>

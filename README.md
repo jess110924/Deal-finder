@@ -11,34 +11,42 @@ listings on eBay.
 
 Different shape from the main deal feed: instead of comparing a price
 against its own history (like Keepa does), this compares a **live eBay
-listing** against an **independent reference price** (PriceCharting).
-Search a card name; it looks up PriceCharting's ungraded market value and
-eBay's current Buy It Now listings for that search, then flags any listing
-priced 20%+ below the reference.
+listing** against **real recent eBay sold prices** for that exact card.
+Search a card name; it looks up eBay's current Buy It Now listings for
+that search, checks each one's own recent sold comps, and flags any
+listing priced 20%+ below the average sold price.
+
+This used to compare against PriceCharting's estimated market value
+instead — removed entirely (see "PriceCharting was removed" below) in
+favor of comparing against what the card has actually sold for, which
+turned out to also be simpler: one fewer API, one fewer category-to-domain
+split to get wrong, and a number that's a real transaction instead of an
+estimate.
 
 Covers two categories, picked via a toggle on both the search box and the
-watchlist add form: **Sports** and **Pokémon**. Each uses a different
-PriceCharting domain and a different eBay category id under the hood (see
-the gotcha section below) — everything else (the 20%-below-reference
+watchlist add form: **Sports** and **Pokémon** — each maps to a different
+eBay category id under the hood; everything else (the 20%-below-average
 threshold, graded/bundle filtering, the watchlist, saved finds) works
 identically for both.
 
 **Graded slabs (PSA/BGS/SGC/CGC) and multi-card lots are excluded from the
-comparison.** Graded cards sell for multiples of an ungraded reference
-price, so comparing them would produce false "amazing deal" signals rather
-than real ones; a lot of several cards for one price isn't comparable to a
-single-card reference at all. Grading is detected via eBay's own
-`condition` field (confirmed reliable: literally "Graded" vs "Ungraded"),
-not a title guess — an earlier title-regex version of this filter missed
-titles like "PSA Graded Mint 9" (words between "PSA" and the grade number)
-and let real graded slabs slip through undetected.
+comparison.** Graded cards sell for multiples of an ungraded price, so
+comparing them would produce false "amazing deal" signals rather than real
+ones; a lot of several cards for one price isn't comparable to a
+single-card price at all. For live eBay listings, grading is detected via
+eBay's own `condition` field (confirmed reliable: literally "Graded" vs
+"Ungraded"), not a title guess — an earlier title-regex version of this
+filter missed titles like "PSA Graded Mint 9" (words between "PSA" and the
+grade number) and let real graded slabs slip through undetected. Sold
+comps come from a different API with no such structured field, so those
+are filtered by a title-based grading-company check instead (see
+`isLikelyGraded` in `lib/sources/soldComps.ts`).
 
 ### Setup
 
 Needs these in `.env`:
 
 ```
-PRICECHARTING_API_KEY=your-existing-key
 EBAY_CLIENT_ID=...
 EBAY_CLIENT_SECRET=...
 SOLD_COMPS_API_KEY=...
@@ -47,119 +55,32 @@ SOLD_COMPS_API_KEY=...
 Get the eBay credentials free at [developer.ebay.com](https://developer.ebay.com) →
 Application Keys → use the **Production** App ID and Cert ID (not Sandbox).
 `SOLD_COMPS_API_KEY` is a paid third-party key (api.sold-comps.com) — see
-"Player Search's sold comps" below for what it's used for. Whichever
+"Sold comps everywhere" below for what it's used for. Whichever
 environment runs the app needs its own copy of these (a local `.env` for
 `npm run dev`, Vercel's project environment variables for production).
 
-### An important gotcha this was built around: pricecharting.com vs sportscardspro.com
+### PriceCharting was removed
 
-The reference-price lookup (`lib/sources/pricecharting.ts`) queries
-**`sportscardspro.com`** for the Sports category, not `pricecharting.com`
-— same company, same account, same API key, same request/response format,
-but a domain scoped specifically to sports cards. This isn't a style
-choice: querying pricecharting.com's own domain for a sports card search
-returns almost entirely irrelevant results (Funko figures, unrelated
-products that happen to share a player's name — sometimes zero real
-matches in the first 100 results for a very well-known card).
-`pricecharting.com` itself is used for the **Pokémon** category instead —
-confirmed live (a "1999 Base Set Charizard" query returns a real, sane
-$489 ungraded reference), since sportscardspro.com is sports-only and
-wouldn't return good Pokémon matches.
+This project originally compared listings against PriceCharting/
+SportsCardsPro's estimated market value, with a "Verify" link/photo
+pointing at the matched product's own page. Removed entirely, requested
+directly ("remove the sportscardpro stuff... I only want sold comps API
+and the options that display average sold price"), after a long chain of
+matching-accuracy fixes on that system (query-stripping bugs, position-0
+trust bugs, self-matched reference photos — see git history if the detail
+ever matters) — sold comps replaced it as the sole comparison basis and
+made a whole category of "is the reference actually right" bugs moot,
+since the comparison is now against real transactions instead of an
+estimate that could itself be mismatched. The genuinely reusable lesson
+that carried over: search with a listing's *full raw title*, not a
+keyword-stripped version — true for PriceCharting matching before, and
+confirmed true again for the sold-comps API (see "Sold comps everywhere"
+below).
 
-The eBay side has an equivalent split: Sports searches use category id
-`212` ("Sports Trading Cards"); Pokémon searches use `183454` ("CCG
-Individual Cards") — confirmed by searching "charizard pokemon card" with
-no category filter and checking which categories real listings actually
-fall under.
-
-Both this and the eBay integration were verified against real accounts —
-the reference price search, the eBay listing search, and the
-graded/bundle filtering were each checked against actual results, not
-assumed to work from documentation alone.
-
-### Verifying the reference is actually the right card
-
-Every place a reference product shows up — the manual search page, each
-saved find on the watchlist, each one Discover surfaces — links straight
-to that product's own page on PriceCharting/SportsCardsPro
-(`productUrl`, built by `buildProductUrl` in `lib/sources/pricecharting.ts`),
-plus a real photo where one's available. Requested directly: the "Verify"
-link originally pointed to an eBay listing instead of PriceCharting
-itself.
-
-PriceCharting's API doesn't return a page URL directly — this is built
-from the product's own console/product name (`/game/<console-slug>/
-<product-slug>`, lowercased and hyphenated), confirmed live rather than
-assumed: fetched the constructed URL for both a sports card
-(sportscardspro.com) and a Pokémon card (pricecharting.com) and checked
-the resulting page's `<title>` actually matched the product. It's built
-deterministically and never fetched or verified server-side per card —
-partly because there's no need to, and partly because trying to fetch it
-server-side hits Cloudflare's bot challenge (confirmed live, even for
-occasional traffic from here) that a real browser navigating there
-doesn't, since that's exactly what the challenge is built to tell apart.
-
-The photo comes from a separate, older mechanism: newer/more searched-for
-products come back from PriceCharting's API with an `epid` — an eBay
-catalog product id. eBay's Catalog API would resolve that directly to a
-product photo, but it needs a permission scope this app's key doesn't
-have (confirmed live: 403 "Insufficient permissions"). Filtering a normal
-Browse API search by that same epid works with the same basic scope
-already used everywhere else, and returns the exact matching product —
-confirmed live against the Luka Doncic Prizm card, whose epid it returned
-back exactly. Not every product has an epid (confirmed absent on some
-older ones, e.g. 1999 Base Set Charizard) — when it's missing, there's no
-photo, but the PriceCharting link (and, failing that, a plain eBay
-search) is always shown regardless, so there's always something to click
-through and double-check by hand.
-
-**A real bug this had, caught live:** the epid-filtered search's `q` text
-used to be the specific listing's own raw title (needed so `findCard`
-could match the right product — see the query-stripping fix above). But
-reusing that same exact title for the *photo* search too meant the
-epid-filtered search almost always found that exact same listing back as
-its own best match — nothing beats an exact title for matching itself.
-Reported directly ("the smaller sportscardpro photo... is the same as
-the big eBay photo") and confirmed live against a real 20-listing search:
-every single time a reference photo was found, it was 100% a duplicate of
-the listing's own photo/URL, not an independent one. Two fixes, in
-`findReferenceListing` (`lib/sources/ebay.ts`) and `buildReferenceInfo`
-(`lib/cardComparison.ts`): (1) the photo search now always queries by the
-*product's own name* (`reference.productName`/`consoleName`) instead of
-the listing's title — a generic, listing-independent query; (2) an
-explicit `excludeItemId` skips the listing being evaluated from the
-results as a second, independent safety net. Re-checked live after the
-fix: 0 of 8 successful photo matches were self-matches (down from 6 of 6
-before), with no drop in how often a photo was found at all — the
-remaining "no photo" cases are products with no other live eBay listing
-under that epid to find, a real data limitation rather than a bug.
-
-Every saved find — from the watchlist or from Discover (below) — carries
-this same reference info (`reference` on `SavedFind` in `lib/db.ts`), not
-just the manual search page. Discover in particular needs it: it matches
-freeform eBay titles to PriceCharting products with no human choosing the
-search term, so mismatches are more likely there than for a deliberately-
-typed watchlist name — the reference link is the way to catch one before
-trusting it. Finds saved before `productUrl` existed fall back to the
-older eBay-sourced links (the field is optional on `ReferenceInfo` for
-exactly this reason).
-
-**Photos side by side, not just a link.** Requested directly: comparing
-by eyeballing a photo, without having to open the reference link on every
-row to check it. Every listing row (search page and all three watchlist
-lists) now shows the listing's own photo next to its reference's photo,
-same size, at roughly a third of a mobile screen's width each — big
-enough to actually compare, not a tiny inline icon. This changed the cost
-math for `evaluateListing` in `lib/cardComparison.ts`: the reference photo
-used to only get fetched (one extra eBay call) for listings that cleared
-the underpriced threshold, since non-underpriced ones were never shown
-anywhere. Now the interactive search page shows every listing regardless
-of underpriced status, so it needs the photo for all of them —
-`searchUnderpricedCards` takes a new `includeAllListingImages` flag for
-this, on only for `/api/cards/search` (a user is looking at the page).
-The watchlist's background check and Discover both leave it off: they
-still only ever show/save the underpriced ones, so fetching a photo for
-everything else checked would be pure waste with nothing gained.
+`lib/sources/pricecharting.ts` no longer exists. `CardCategory` (still
+needed — Sports vs. Pokémon still drives which eBay category id gets
+searched, `212` vs `183454`) moved to `lib/sources/ebay.ts`, the one
+place it's still functionally used.
 
 ### Watchlist — automatic background checking
 
@@ -170,7 +91,7 @@ persists until you dismiss it — server-stored now (not just your browser),
 so it's the same list regardless of which device you check it from.
 
 Adding a card also runs one check immediately (takes a few seconds — it's
-a real eBay + PriceCharting search, the "Add" button shows "Checking…"
+a real eBay search + sold-comps check, the "Add" button shows "Checking…"
 while it runs) rather than only registering the card and leaving you
 waiting up to 30 minutes with nothing to look at. If that immediate check
 happens to fail for some reason, the card still gets added to the
@@ -218,30 +139,26 @@ dismissal, so it won't reappear in the review queue either way.
 
 #### "↻ Refresh reference" — a saved find is a snapshot, not a live view
 
-Reported directly: after the self-matched-photo bug above got fixed, an
-already-saved find kept showing the exact same broken photo anyway. Not
-a regression — a saved find's `reference` is computed once, at the
-moment it's found, and stored as-is; it was never recomputed against
-later matching-logic fixes. Confirmed live: re-running the match for the
-*exact same reported card* (`findCard` + `buildReferenceInfo`) with the
-already-shipped fix produced a correct, independent photo immediately —
-the fix worked, but the specific find on screen predated it.
+Reported directly, back when matching was still PriceCharting-based:
+after a matching bug got fixed, an already-saved find kept showing the
+exact same broken data anyway. Not a regression — a saved find's
+comparison data is computed once, at the moment it's found, and stored
+as-is; it was never recomputed against later matching-logic fixes.
 
 Dismissing isn't a good answer here: `dismissFind` (and `confirmFind`/
 `flagMismatch`) permanently blocklist that listing's item id
 (`card-dismissed-ids`) so a real, still-available deal would never be
-suggested again just because its cached reference happened to be stale.
+suggested again just because its cached data happened to be stale.
 Added a third option instead — "↻ Refresh reference" on each find in the
-review queue re-runs `findCard`/`buildReferenceInfo` for that one
-listing's title right now and overwrites just its stored `reference`/
-`percentBelowReference` in place (`updateFindReference` in `lib/db.ts`,
-`action: "refresh"` on `POST /api/cards/finds`) — the find stays exactly
-where it is, just with current data. This is the general answer to a
-problem that's already happened three times in one session (query
-stripping, result ranking, self-matched photos): every future matching
-fix will only apply to new finds unless an existing one is explicitly
-refreshed, so this is the tool for "this looks wrong, is it actually
-still wrong under today's logic?" without losing the find either way.
+review queue re-runs `getSoldComps` for that one listing's title right
+now and overwrites just its stored `soldComps`/`percentBelowReference` in
+place (`updateFindSoldComps` in `lib/db.ts`, `action: "refresh"` on
+`POST /api/cards/finds`) — the find stays exactly where it is, just with
+current data. This is the general answer to a problem that's come up
+more than once already: every future matching fix will only apply to new
+finds unless an existing one is explicitly refreshed, so this is the
+tool for "this looks wrong, is it actually still wrong under today's
+logic?" without losing the find either way.
 
 This needed two things the rest of the project doesn't use: an actual
 database, and a way to run checks on a schedule with nobody's browser
@@ -287,7 +204,7 @@ can't surface a card worth watching that nobody's added yet. Discover
 (`lib/cardDiscovery.ts`, `app/api/cards/discover/route.ts`, runs hourly
 via `.github/workflows/discover-deals.yml`) fills that gap: it browses
 eBay's live listings directly (no keyword, just the category — Sports or
-Pokémon), checks each one against its own PriceCharting match, and saves
+Pokémon), checks each one against its own recent sold comps, and saves
 anything underpriced to the same "Saved finds" list as the watchlist.
 
 A few things this needed that a name-driven search doesn't — each found
@@ -297,13 +214,11 @@ by actually running it live and looking at the real results, not assumed:
   with no `q` — confirmed live. Sorted by price ascending it was almost
   entirely near-worthless base commons (~$2-3); sorted by price
   descending it surfaced ultra-rare autographs/jerseys/1-of-1s instead —
-  and *every one* of those came back matched against a wildly lower,
-  clearly-wrong PriceCharting reference (a $1500 1-of-10 autographed
-  jersey matched to an unrelated $6.50 base card), because PriceCharting's
-  catalog doesn't really cover one-of-a-kind memorabilia. Settled on
-  **sorted by newest-listed, within a $20-$300 band** (`lib/sources/ebay.ts`,
-  `browseCategory`) — the range PriceCharting's catalog actually covers
-  well (standard rookies/parallels), not the extremes.
+  those tend to have too little real sold history to compare against
+  reliably (often one sale, or none). Settled on **sorted by newest-
+  listed, within a $20-$300 band** (`lib/sources/ebay.ts`,
+  `browseCategory`) — the range with enough standard rookies/parallels
+  actually selling regularly to judge, not the extremes.
 - **The Pokémon category isn't Pokémon-only.** eBay's `183454` ("CCG
   Individual Cards") turned out to be a shared bucket across every
   non-sports card game — a keyword-free browse of it came back full of
@@ -321,27 +236,20 @@ by actually running it live and looking at the real results, not assumed:
   lot/bundle titles; a second pattern in `lib/cardDiscovery.ts`
   (`NON_CARD_PATTERN`) catches the accessory/collection kind it doesn't.
 - **Match quality is genuinely lower than a deliberate search.** This is
-  worth being honest about: testing live, feeding a full freeform eBay
-  title (year, set, parallel name, serial number, and all) into
-  PriceCharting's search frequently returned an unrelated product as the
-  top match rather than the right one — more often than not, in the
-  batches tested. The threshold direction protects against this turning
-  into a false "deal" (a bad match only becomes a problem if it happens
-  to look *underpriced*, and in every mismatch observed during testing it
-  went the other way — the listing was worth far more than whatever
-  unrelated product got matched, not less), so nothing false-positive
-  showed up in testing. But it does mean Discover may go a while between
-  genuine finds, and a higher bar than the usual 20%
-  (**25%**, `DISCOVERY_THRESHOLD_PERCENT`) adds a small further margin.
-  The real safeguard either way is the reference photo/link attached to
-  every discovered find — check that before trusting one, every time.
-- **API cost.** Each run makes one PriceCharting lookup per browsed
-  listing (~25 per category × 2 categories per hourly run), on top of
-  what the watchlist already uses — noticeably more than the watchlist
-  alone. That's why it runs hourly rather than every 30 minutes. Both the
-  batch size (`limit` in `discoverDeals`) and the cron schedule are easy
-  to tune up or down depending on what PriceCharting's plan actually
-  allows.
+  worth being honest about: a freeform eBay title (year, set, parallel
+  name, serial number, and all) matched against sold comps with no human
+  choosing the search term is more likely to pull in the wrong parallel's
+  comps than a deliberately-typed watchlist name would. A higher bar than
+  the usual 20% (**25%**, `DISCOVERY_THRESHOLD_PERCENT`) adds a small
+  margin against this turning into a false "deal." The real safeguard
+  either way is the sold-comps link attached to every discovered find —
+  check that before trusting one, every time.
+- **API cost.** Each run makes one sold-comps lookup per browsed listing
+  (~25 per category × 2 categories per hourly run), on top of what the
+  watchlist already uses. That's why it runs hourly rather than every 30
+  minutes. Both the batch size (`limit` in `discoverDeals`) and the cron
+  schedule are easy to tune up or down depending on the sold-comps
+  service's own usage limits.
 - **This actually broke in production, silently, for a while.** Both this
   endpoint and check-watchlist failed on every single scheduled run from
   the day they were set up — not a code bug, a missing GitHub Actions
@@ -352,19 +260,18 @@ by actually running it live and looking at the real results, not assumed:
   (`api.github.com/repos/.../actions/workflows/.../runs`) rather than
   guessing. Once those two secrets were actually added, a second, real
   bug surfaced: the original `discoverDeals` checked each browsed listing
-  against PriceCharting one at a time in a loop — up to 25 sequential
-  round-trips per category, ~50 total per run — which was slow enough to
-  exceed Vercel's serverless function timeout outright (confirmed live: a
-  production run got no response at all after 60 seconds). Fixed with
-  bounded concurrency (`mapWithConcurrency` in `lib/cardDiscovery.ts`,
-  6 at a time — fully unbounded, all 25 at once, risks looking like
-  abusive traffic to PriceCharting instead) plus running both categories
-  in parallel rather than sequentially, and an explicit
-  `export const maxDuration = 60` (Vercel Hobby's ceiling) as a backstop.
-  Confirmed live after the fix: full run in ~18 seconds.
+  one at a time in a loop — up to 25 sequential round-trips per category,
+  ~50 total per run — which was slow enough to exceed Vercel's serverless
+  function timeout outright (confirmed live: a production run got no
+  response at all after 60 seconds). Fixed with bounded concurrency
+  (`mapWithConcurrency` in `lib/cardDiscovery.ts`, 6 at a time — fully
+  unbounded, all 25 at once, risks looking like abusive traffic instead)
+  plus running both categories in parallel rather than sequentially, and
+  an explicit `export const maxDuration = 60` (Vercel Hobby's ceiling) as
+  a backstop. Confirmed live after the fix: full run in ~18 seconds.
 
-No separate setup needed — it reuses the same `PRICECHARTING_API_KEY`,
-`EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`, `CRON_SECRET`, and
+No separate setup needed — it reuses the same `EBAY_CLIENT_ID`/
+`EBAY_CLIENT_SECRET`, `SOLD_COMPS_API_KEY`, `CRON_SECRET`, and
 `DEAL_FINDER_URL` GitHub secret already configured for the watchlist.
 
 ### Player Search — the manual "browse a player, then check the margin" workflow
@@ -374,9 +281,9 @@ scan for cards in a $30-$100 sweet spot, pick one, then check what
 similar listings of that exact card go for before buying. `PlayerSearch`
 (`components/PlayerSearch.tsx`, `lib/playerSearch.ts`,
 `app/api/cards/player-search` + `app/api/cards/peer-check`) does the
-first part as a plain price-banded eBay browse (no PriceCharting
-reference — a player name isn't one product) and the second as an
-on-demand "Check similar listings" button per result.
+first part as a plain price-banded eBay browse (no comparison figure — a
+player name isn't one product) and the second as an on-demand "Check
+similar listings" button per result.
 
 #### Player Search's sold comps — real sold prices, not asking prices
 
@@ -397,20 +304,19 @@ in `lib/soldComps.ts` filters out graded slabs and bundles, applies the
 print-run-denominator safety net (same pattern used elsewhere in this
 project), and returns a `SoldCompsSummary` — comp count, average/median
 sold price, the most recent sale, a direct link to eBay's own sold/
-completed search for that title (`soldSearchUrl`, the "verify" link —
-same role `productUrl` plays for the PriceCharting reference), and the
-full list. The route (`app/api/cards/peer-check`) also takes the
+completed search for that title (`soldSearchUrl`, the "verify" link), and
+the full list. The route (`app/api/cards/peer-check`) also takes the
 listing's own asking price, so the response can say directly "this
 listing is N% below the average recent sold price."
 
-**A real bug caught immediately, same lesson as the PriceCharting fix
-earlier in this project:** the API's own condition/conditionId fields
-don't reliably separate graded slabs from raw cards (a PSA 10 came back
-as plain "New (Other)", confirmed live) — grading is detected from the
-title instead (`isLikelyGraded` in `lib/sources/soldComps.ts`), on the
-theory that a raw card's title has no reason to mention a grading
-company at all. And exactly like `findCard`'s query-stripping bug: this
-API has no relevance scoring of its own, so feeding it a keyword-stripped
+**A real bug caught immediately:** the API's own condition/conditionId
+fields don't reliably separate graded slabs from raw cards (a PSA 10 came
+back as plain "New (Other)", confirmed live) — grading is detected from
+the title instead (`isLikelyGraded` in `lib/sources/soldComps.ts`), on
+the theory that a raw card's title has no reason to mention a grading
+company at all. And a lesson learned the same way earlier in this
+project for the (since-removed) PriceCharting matching: this API has no
+relevance scoring of its own, so feeding it a keyword-stripped
 query ("Luka Doncic silver prizm") for a "2018-19 Panini Prizm - Freshman
 Phenoms Luka Doncic #23 Silver Prizm" pulled in 21 loosely-related Silver
 Prizm comps spanning unrelated years/sets (median $3, one real sale of
@@ -430,51 +336,30 @@ can use it without depending on each other) and is now called from every
 place a listing gets evaluated:
 
 - `evaluateListing` in `lib/cardComparison.ts` (the manual search page
-  and every watchlist check) — run in parallel with the PriceCharting
-  `findCard` lookup via `Promise.all`, not gated behind it succeeding,
-  since sold history is useful on its own even when there's no
-  PriceCharting match for a listing. Both failures are caught
-  independently (`.catch(() => null)`) so one API being down doesn't
-  break the other.
-- `discoverDeals` in `lib/cardDiscovery.ts` — only for candidates that
-  already clear the underpriced threshold (Discover only ever saves
-  those anyway, so fetching sold comps for filtered-out candidates would
-  be pure waste).
-- The "↻ Refresh reference" action (`app/api/cards/finds/route.ts`) now
-  refreshes sold comps alongside the PriceCharting reference, since
-  they're both snapshots taken at find-time (see "a saved find is a
-  snapshot, not a live view" above).
-
-Every listing/find that gets a match now shows both figures side by
-side. This turned out to be a genuinely useful cross-check beyond what
-was asked for: a real example surfaced immediately in testing — a "2023
-Panini Prizm Draft Picks #57 Ja Morant" listing matched to a $450
-PriceCharting reference ("Choice Nebula" parallel) sitting right next to
-"Sold comps: avg $2.82 across 18 sales" — a 160x gap that's an obvious
-signal the PriceCharting match is wrong, visible at a glance without
-needing to click through and check by hand.
-
-**Cost tradeoff, measured live, not assumed:** every listing now makes
-three external API calls instead of two (eBay search once per query,
-then PriceCharting + sold-comps per listing). A 20-listing search that
-took 3-5 seconds before takes about 11-12 seconds now — confirmed live,
-still comfortably an interactive wait, not a timeout risk for the search
-page. The watchlist's scheduled check (`WATCHLIST_CONCURRENCY = 3`,
-`maxDuration = 60`) is the one place this is worth watching: 3 cards
-running this per-listing work concurrently, each now taking roughly
-2-3x longer per card, could get closer to the 60-second ceiling with a
-large watchlist. Not changed preemptively — no timeout has actually been
-observed — but worth revisiting if one is reported.
+  and every watchlist check) — the sole comparison lookup per listing
+  now that PriceCharting is gone entirely (see "PriceCharting was
+  removed" above; at the time this shipped it ran alongside a
+  PriceCharting lookup instead, which is what first surfaced how useful
+  having both side by side actually was — a real example: a "2023 Panini
+  Prizm Draft Picks #57 Ja Morant" listing matched to a $450 PriceCharting
+  reference sat right next to "Sold comps: avg $2.82 across 18 sales," a
+  160x gap that was an obvious signal the PriceCharting match was wrong).
+- `discoverDeals` in `lib/cardDiscovery.ts` — the sole comparison lookup
+  for candidates as well now.
+- The "↻ Refresh reference" action (`app/api/cards/finds/route.ts`)
+  refreshes a find's sold comps, since they're a snapshot taken at
+  find-time (see "a saved find is a snapshot, not a live view" above).
 
 ### The keyword-extraction fix — why raw eBay titles make bad search queries
 
 Reported directly, and confirmed live to be a serious problem, not a
-minor one: feeding a full eBay title into either PriceCharting's search
-or eBay's own search frequently returns the *wrong* product. Two
+minor one: feeding a full eBay title into either the reference-price
+lookup or eBay's own search frequently returns the *wrong* product. Two
 separate live failures drove this:
 
-1. PriceCharting matched a rare 1-of-10 autographed jersey card against
-   an unrelated $6.50 base card that happened to share enough words.
+1. The reference-price lookup (PriceCharting, at the time) matched a
+   rare 1-of-10 autographed jersey card against an unrelated $6.50 base
+   card that happened to share enough words.
 2. eBay's own keyword search, used for the peer/similar-listings
    comparison above, pulled a $2.25 "Blue Shimmer Prizm" into the
    "peers" of a "Gold Wave Prizms" card — and even after narrowing to
@@ -542,159 +427,32 @@ A few things that made this trickier than it looks:
 This is used in two places today: Player Search's peer-check (has a
 known subject from the search box) and the main search box/watchlist's
 eBay listings search (only when the query itself carries a serial
-number). It no longer feeds `findCard`/PriceCharting anywhere — see
-"Why `extractSearchKeywords` no longer feeds `findCard`" further down
-for why that changed.
+number) — narrowing eBay's own keyword search, which has no relevance
+scoring to fall back on. It's never used to build the sold-comps query
+(`getSoldComps` always searches with the full raw title — see "Sold
+comps everywhere" above) for the same reason it stopped feeding the
+PriceCharting lookup before that was removed: once a scorer/ranker
+exists on the other end, stripping the query down is pure downside.
 
-### PriceCharting result ranking — why it was matching the wrong card even with a good query
+### The rest of the PriceCharting-matching bug chain (historical)
 
-Reported directly ("a lot of the cards I search there's a lot of
-mismatches") and confirmed live to be real and frequent, not rare edge
-cases: `findCard` (`lib/sources/pricecharting.ts`) used to just trust
-whatever PriceCharting's own `/products` search put first — but that
-ranking isn't reliably relevance-to-the-player. Two live examples that
-exposed this directly, with a good, already-cleaned query:
-
-- `"Ja Morant Select Concourse"` put a completely unrelated Brian Thomas
-  Jr. **football** card first. The real Ja Morant match existed in the
-  results — 5th place, not 1st.
-- `"Shohei Ohtani Topps Chrome"` (no year given) put a $492 2026 base
-  card ahead of his $89,688 2018 rookie.
-
-Fixed by scoring every candidate PriceCharting actually returned instead
-of trusting position 0: `relevanceScore` counts what fraction of the
-*query's own* words appear in each candidate's product+console name
-(deliberately not the reverse — a candidate naturally carries extra
-words, like year and set, that the query didn't ask for and shouldn't be
-penalized for), and `findCard` now picks whichever candidate scores
-highest. Confirmed live this promotes the real Ja Morant card to the
-top, and left the two Jalen Johnson/Cade Cunningham cases from the
-sections above correctly unaffected (checked all three again after
-shipping this fix, in the real app, not just the scoring function in
-isolation).
-
-**What this doesn't fix**: genuine query ambiguity. The Ohtani example
-has no year to go on, so several of his different-year Topps Chrome
-cards score identically — nothing server-side can resolve that without
-more specific input (the UI's own placeholder text already models
-this: "e.g. 2018 Panini Prizm Luka Doncic" includes a year for exactly
-this reason). Scoring fixes "matched a completely different player,"
-not "matched the right player's wrong year" when the query itself
-doesn't say which year.
-
-### The real root cause — one shared reference for every listing in a search
-
-Reported directly again after the fix above ("cards still don't match
-so the data isn't accurate") — this was a deeper, architectural problem
-the ranking fix didn't touch. A real production example made it obvious:
-a watchlist entry just named **"Luka doncic"** (no year/set/parallel)
-flagged a $29.99 2024-25 Panini Obsidian Red Electric Etch parallel as
-"45% under reference" — against a 2018 Panini Prizm base card's $54.98
-price. Two completely unrelated products, sharing nothing but a player's
-name.
-
-The cause: `searchUnderpricedCards` ran `findCard` **once**, for the
-overall search query, and compared *every* listing it got back against
-that single result. That's fine for a specific query where every listing
-really is the same card — but a broad query like a bare player name
-returns listings spanning dozens of genuinely different cards, and
-comparing all of them against one shared reference is comparing apples
-to oranges. Discover already worked correctly this whole time for
-exactly this reason — it checks each browsed listing against its own
-match, never a shared one — so it was the correctness fix that needed
-to reach the manual search and watchlist too, not a new one to invent.
-
-`evaluateListing` in `lib/cardComparison.ts` now does exactly what
-Discover's per-listing check does: for each listing, look up its own
-best-matching PriceCharting product (via relevance-scored `findCard`,
-fixed above — see "Why `extractSearchKeywords` no longer feeds
-`findCard`" below for why this is now the *raw* listing title, not a
-keyword-stripped version) and compute *that* listing's underpriced
-status against *its own* match.
-`searchUnderpricedCards`'s original single `findCard` call still runs —
-it's shown at the top of the manual search page as context for the
-overall query — but it no longer decides whether any individual listing
-below it counts as a deal. Confirmed live: the same bare `"Luka doncic"`
-search now shows each listing correctly matched to its own specific
-card (a 2019-20 Hoops Silver Holo parallel priced against its own $401
-reference, a 2020-21 Panini Instant Dirk Nowitzki/Luka dual-player
-card `/3` against its own $560 reference, etc.) instead of one number
-applied to all of them.
-
-**Real costs this introduced, and what was done about each:**
-
-- **Every listing now costs its own PriceCharting lookup** (up to ~30
-  per search, instead of 1) — checked with bounded concurrency
-  (`mapWithConcurrency`, extracted to `lib/concurrency.ts` and shared
-  with Discover, which already used the same pattern) rather than
-  sequentially, the same fix Discover's own timeout problem already
-  needed. Concurrency is 12, tuned up from Discovery's original 6 after
-  measuring live: a broad search that took 24-32 seconds at concurrency
-  6 dropped to 3-5 seconds at 12, with no errors — PriceCharting hasn't
-  shown any rate-limiting behavior in any testing throughout this
-  project, unlike sportscardspro.com/pricecharting.com's own *website*
-  (Cloudflare-protected, unrelated to the API).
-- **The watchlist's scheduled check got meaningfully slower per card**
-  (each card now does its own ~30 lookups instead of 1), which put a
-  realistic watchlist size right up against Vercel's 60-second function
-  ceiling if run sequentially, the same failure mode Discover already
-  hit once. Fixed the same way: `app/api/cards/check-watchlist/route.ts`
-  now checks up to 3 watchlist cards concurrently (`WATCHLIST_CONCURRENCY`)
-  instead of one at a time, and declares `maxDuration = 60` as a backstop.
-- **The extra eBay photo lookup inside `buildReferenceInfo`** only runs
-  for listings that actually clear the underpriced threshold, not all
-  ~30 checked — the same cost-control Discover already used, now applied
-  here too, so the added accuracy doesn't multiply the eBay call count
-  on top of the PriceCharting one.
-
-The manual search page also changed to reflect this: the listings list
-now shows each listing's own match beneath it ("vs $X for '...'", with
-its own PriceCharting link) rather than implying every row was checked
-against the box at the top of the page.
-
-### Why `extractSearchKeywords` no longer feeds `findCard`
-
-Reported directly, after the two fixes above were already live: searching
-`"Kyrie Irving 2025-26 Topps Inception Gold Electricity Mavericks /50"`
-returned a completely different card — a **2024 Panini Prizm Monopoly**
-Kyrie Irving — as the verify link, wrong set and wrong year entirely.
-
-The cause was the keyword-stripping step itself (the same
-`extractSearchKeywords` documented above), now working against the
-relevance-scoring fix rather than for it. Its allow-list only keeps a
-guessed subject + recognized `COLOR_WORDS`/`FINISH_WORDS` + the serial
-number — "Topps", "Inception", and "Electricity" aren't on either list,
-so they were silently dropped, leaving the query `"Kyrie Irving gold
-/50"`. Confirmed live, directly against the real API: that stripped
-query's top-scored candidate is the wrong 2024 Panini Prizm Monopoly
-card, while the **full, unstripped** query's top-scored candidate is the
-correct 2025 Topps Inception one — the relevance scorer had the right
-answer available the whole time, but the query-cleaning step upstream
-of it had already thrown away the words it needed to find it.
-
-This function predates relevance scoring — it was built specifically
-because `findCard` used to blindly trust PriceCharting's position-0
-result, so handing it a short, hand-curated query was the only lever
-available. Now that `findCard` scores every candidate against the
-query's own words instead, stripping the query down is pure downside:
-it can only remove disambiguating signal, never add any. Re-verified
-live against the original cases that motivated the stripping in the
-first place (a Jalen Johnson Noir auto, a Cade Cunningham Chrome
-refractor, a Ja Morant Select card) with the full, unstripped title —
-all three still match correctly with scoring alone.
-
-Fixed by passing the raw title/query straight to `findCard` at all
-three call sites that used it for PriceCharting matching:
-`evaluateListing` and `searchUnderpricedCards`'s top-of-page reference
-(`lib/cardComparison.ts`), and Discover's per-listing check
-(`lib/cardDiscovery.ts`). `extractSearchKeywords` itself wasn't
-deleted — it's still genuinely useful for narrowing **eBay's own**
-keyword search, which has no relevance scoring to fall back on:
-`searchUnderpricedCards`'s `effectiveQuery` (feeds `searchListings`,
-not `findCard`) and Player Search's peer-check (`comparePeerListings`
-in `lib/playerSearch.ts`) still use it for exactly that. The distinction
-that matters: strip the query for eBay's dumb keyword search, but never
-for PriceCharting's `findCard`, which can do its own disambiguation now.
+Several more accuracy bugs got found and fixed in the PriceCharting-based
+version of this comparison before it was removed entirely — trusting
+whatever PriceCharting's search put first instead of scoring candidates
+(a `"Ja Morant Select Concourse"` search put an unrelated football card
+ahead of the real match), then a deeper architectural bug where one
+shared reference got applied to every listing in a broad search instead
+of each listing getting its own (a bare `"Luka doncic"` watchlist entry
+flagged a $29.99 listing as "45% under reference" against a completely
+unrelated $54.98 product, sharing nothing but a player's name), then the
+keyword-stripping-vs-relevance-scoring conflict described above. None of
+that code exists anymore — see git history around the "PriceCharting"
+commits if the specifics ever matter again — but the pattern across all
+of them (score candidates instead of trusting position 0; give each
+listing its own comparison, never a shared one; search with the full
+title once a scorer/ranker exists to make sense of it) is exactly what
+the sold-comps implementation above was built with from the start,
+rather than having to relearn each lesson a second time.
 
 ## Stack
 
@@ -988,8 +746,9 @@ site is wide open without it.
 - `lib/sources/keepa.ts` — Amazon price-drop search (needs your API key)
 - `lib/auth.ts`, `proxy.ts`, `app/login/` — the password gate
 - `app/cards/page.tsx`, `components/CardSearch.tsx` — manual card search
-- `lib/cardComparison.ts` — eBay-vs-PriceCharting comparison + filtering
-- `lib/sources/pricecharting.ts`, `ebay.ts` — the two card data sources
+- `lib/cardComparison.ts` — eBay listings vs. sold-comps comparison + filtering
+- `lib/sources/ebay.ts` — eBay listings/browse + the `CardCategory` type
+- `lib/soldComps.ts`, `lib/sources/soldComps.ts` — the sold-comps lookup (business logic + raw API client)
 - `lib/db.ts` — Upstash Redis: watchlist, saved finds, My Picks, Mismatches, dismissed-ids
 - `components/CardWatchlist.tsx` — watchlist manager + saved-finds review UI
 - `app/api/cards/confirmed/route.ts`, `mismatches/route.ts` — My Picks / Mismatches endpoints
@@ -1000,4 +759,4 @@ site is wide open without it.
 - `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the hourly Discover run
 - `components/PlayerSearch.tsx`, `lib/playerSearch.ts` — price-banded player browse + peer-listing check
 - `app/api/cards/player-search/route.ts`, `app/api/cards/peer-check/route.ts` — their endpoints
-- `lib/cardKeywords.ts` — rewrites a raw eBay title into a short, targeted search query
+- `lib/cardKeywords.ts` — rewrites a raw eBay title into a short, targeted search query (used for eBay's own keyword search only)

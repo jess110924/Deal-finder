@@ -13,8 +13,7 @@ export type SoldCompsSummary = {
   sales: SoldComp[]; // sorted most recent first
   // A direct link to eBay's own sold/completed listings for this title —
   // the "verify" link: lets anyone double-check the comps by hand on
-  // eBay itself, the same role productUrl plays for the PriceCharting
-  // reference elsewhere in this project.
+  // eBay itself.
   soldSearchUrl: string;
 };
 
@@ -27,14 +26,12 @@ export type SoldCompsSummary = {
  * completed listing data (confirmed live: the `buy.marketplace.insights`
  * scope this would need comes back "invalid_scope" for this app's key).
  *
- * No `category` parameter — unlike PriceCharting, the sold-comps API
- * isn't split by category (sports vs. pokemon), so there's nothing to
- * pass.
+ * No `category` parameter — the sold-comps API isn't split by category
+ * (sports vs. pokemon), so there's nothing to pass.
  *
  * Searches with the listing's full raw title, not a keyword-stripped
- * version — confirmed live this matters, the same lesson learned earlier
- * in this project for PriceCharting matching (see cardComparison.ts):
- * this API does its own eBay-style relevance ranking, so stripping the
+ * version — confirmed live this matters: this API does its own eBay-style
+ * relevance ranking, so stripping the
  * query down to "Luka Doncic silver prizm" for a "Freshman Phenoms"
  * insert actually made results *worse* — 21 loosely-related "Silver
  * Prizm" comps spanning many unrelated years/sets ($0.45-$129.99, median

@@ -25,10 +25,11 @@ export async function POST(request: NextRequest) {
     const watchlist = await addToWatchlist(name.trim(), cat);
 
     // Immediate check on add — otherwise there's zero feedback until the
-    // next scheduled run, up to 30 minutes away. This is a real eBay +
-    // PriceCharting search, so it takes a few seconds; the checkbox-style
-    // instant response isn't possible here, but "wait a few seconds" beats
-    // "wait up to 30 minutes with nothing to look at" by a lot.
+    // next scheduled run, up to 30 minutes away. This is a real eBay
+    // search + sold-comps check, so it takes a few seconds; the
+    // checkbox-style instant response isn't possible here, but "wait a
+    // few seconds" beats "wait up to 30 minutes with nothing to look at"
+    // by a lot.
     let checkError: string | null = null;
     try {
       await checkCardAndSaveFinds(name.trim(), cat);

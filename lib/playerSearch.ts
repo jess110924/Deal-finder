@@ -4,7 +4,7 @@ import { isGraded, isBundle, type CardCategory } from "@/lib/cardComparison";
 /**
  * Step 1 of the manual "browse a player, eyeball the $30-$100 range"
  * process: a plain price-banded eBay search for a player's name, with no
- * PriceCharting reference attached — a player name isn't one product, so
+ * comparison figure attached — a player name isn't one product, so
  * there's nothing single to compare against yet. Ungraded/non-bundle only,
  * same as the rest of the site.
  */
