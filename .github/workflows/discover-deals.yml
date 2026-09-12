@@ -1,15 +1,17 @@
 name: Discover card deals
 
-# Hourly, not every 30 minutes like check-watchlist — each run makes one
-# PriceCharting lookup per browsed listing (~25 per category, 2 categories),
-# so it burns through PriceCharting's request budget noticeably faster than
-# the watchlist check does. Tune the cadence here and the batch size
-# (the `limit` argument to discoverDeals in lib/cardDiscovery.ts) together
-# if PriceCharting's plan allows more — or less, if this turns out to be
-# too much.
+# DISABLED (schedule commented out) — requested directly: this made one
+# sold-comps API call per browsed listing (~25 per category, 2 categories)
+# every hour, ~32,000 calls/month on its own, against a paid API metered
+# at 2,000-10,000 calls/month. That's more than the entire budget for an
+# exploratory feature that isn't the core "search a specific card, find
+# price differences" workflow. `workflow_dispatch` is left in place so it
+# can still be run manually (Actions tab -> "Discover card deals" ->
+# "Run workflow") if wanted occasionally, and the schedule line can be
+# uncommented to turn it back on if the sold-comps budget allows it later.
 on:
-  schedule:
-    - cron: "0 * * * *"
+  # schedule:
+  #   - cron: "0 * * * *"
   workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
 
 jobs:

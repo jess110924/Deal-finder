@@ -81,7 +81,26 @@ async function evaluateListing(listing: EbayListing, category: CardCategory): Pr
   return { ...listing, priceDollars, percentBelowReference, isUnderpriced, soldComps };
 }
 
-export async function searchUnderpricedCards(query: string, category: CardCategory): Promise<CardSearchResult> {
+/**
+ * `maxListingsToEvaluate` caps how many listings get their own sold-comps
+ * lookup (the expensive part — one paid API call each) — left unlimited
+ * for the interactive search page (a user asked for this specific search,
+ * bounded by how often they actually search), but the watchlist's
+ * automated background check passes a small number here. Requested
+ * directly after realizing the unattended jobs' actual cost: checking
+ * every listing (~20-25) for every watched card, every 30 minutes, was
+ * projected at ~34,500 sold-comps calls/month for a *single* watched
+ * card against a paid API metered at 2,000-10,000/month. Capped to the
+ * cheapest N listings — cheapest-first is a reasonable proxy for "most
+ * likely underpriced" even before their own comps are known, and a real
+ * deal is exactly what this is trying to catch, not exhaustive coverage
+ * of every listing that exists.
+ */
+export async function searchUnderpricedCards(
+  query: string,
+  category: CardCategory,
+  maxListingsToEvaluate?: number
+): Promise<CardSearchResult> {
   // Only rewrite the query when it carries a print-run denominator
   // ("/150") — a strong, safe signal this is a pasted-in raw eBay title
   // rather than a short deliberate search like "2018 Panini Prizm Luka
@@ -114,6 +133,16 @@ export async function searchUnderpricedCards(query: string, category: CardCatego
     if (withSerial.length > 0) ungradedListings = withSerial;
   }
 
+  // Cheapest-first cap — see the doc comment on `maxListingsToEvaluate`.
+  // Sorting by raw asking price here (not by anything comps-derived,
+  // since comps don't exist yet) is the only ordering available before
+  // spending the API calls that would tell us more.
+  if (maxListingsToEvaluate != null && ungradedListings.length > maxListingsToEvaluate) {
+    ungradedListings = [...ungradedListings]
+      .sort((a, b) => a.priceCents - b.priceCents)
+      .slice(0, maxListingsToEvaluate);
+  }
+
   // Each listing checked against its own comps, not the shared `soldComps`
   // above — see evaluateListing's doc comment for why. Bounded
   // concurrency for the same reason Discover uses it: sequential would
@@ -131,6 +160,11 @@ export async function searchUnderpricedCards(query: string, category: CardCatego
   return { query, category, soldComps, listings };
 }
 
+// Cheapest 5 listings per card, per check — see the doc comment on
+// searchUnderpricedCards's maxListingsToEvaluate for the cost math this
+// is protecting against.
+const WATCHLIST_MAX_LISTINGS_PER_CHECK = 5;
+
 /**
  * Runs a search for one watchlist card and saves any underpriced listings
  * found. Shared by the scheduled check (check-watchlist route, every ~30
@@ -147,7 +181,7 @@ export async function searchUnderpricedCards(query: string, category: CardCatego
  * once for the PriceCharting-based version of this same logic.
  */
 export async function checkCardAndSaveFinds(card: string, category: CardCategory): Promise<number> {
-  const result = await searchUnderpricedCards(card, category);
+  const result = await searchUnderpricedCards(card, category, WATCHLIST_MAX_LISTINGS_PER_CHECK);
   const candidates: SavedFind[] = result.listings
     .filter((l) => l.isUnderpriced)
     .map((l) => ({
