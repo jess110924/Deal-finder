@@ -31,6 +31,21 @@ export function extractSerialDenominator(title: string): string | null {
   return m ? `/${m[1]}` : null;
 }
 
+// A "lot of 5" (or similar bundle) listing's price covers multiple cards,
+// not the one being searched for — comparing its total price against a
+// single-card reference price is meaningless, not just ungraded-vs-graded
+// mismatched. Caught this from a real result: a 5-card lot spanning three
+// different products (Hoops, Chronicles, Prizm Emergent) at $350 sitting
+// in results for a Prizm-only search, condition "New" so the grading
+// filter didn't (and shouldn't have) caught it. Lives here (not
+// cardComparison.ts) so both cardComparison.ts and lib/soldComps.ts can
+// use it without an import cycle between the two.
+const LOT_PATTERN = /\b(lot of|lot\/|\(\d+\)|\d+[- ]card lot|bundle)\b/i;
+
+export function isBundle(title: string): boolean {
+  return LOT_PATTERN.test(title);
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

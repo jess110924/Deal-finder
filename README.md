@@ -393,13 +393,15 @@ active seller of a card happens to be overpricing it right now, asking
 prices are inflated right along with them, but sold prices aren't.
 
 `lib/sources/soldComps.ts` wraps the API (`fetchSoldComps`); `getSoldComps`
-in `lib/playerSearch.ts` filters out graded slabs and bundles, applies
-the print-run-denominator safety net (same pattern used elsewhere in this
+in `lib/soldComps.ts` filters out graded slabs and bundles, applies the
+print-run-denominator safety net (same pattern used elsewhere in this
 project), and returns a `SoldCompsSummary` — comp count, average/median
-sold price, the most recent sale, and the full list. The route
-(`app/api/cards/peer-check`) also takes the listing's own asking price
-now, so the response can say directly "this listing is N% below the
-average recent sold price" instead of only comparing peers to each other.
+sold price, the most recent sale, a direct link to eBay's own sold/
+completed search for that title (`soldSearchUrl`, the "verify" link —
+same role `productUrl` plays for the PriceCharting reference), and the
+full list. The route (`app/api/cards/peer-check`) also takes the
+listing's own asking price, so the response can say directly "this
+listing is N% below the average recent sold price."
 
 **A real bug caught immediately, same lesson as the PriceCharting fix
 earlier in this project:** the API's own condition/conditionId fields
@@ -415,6 +417,54 @@ Prizm comps spanning unrelated years/sets (median $3, one real sale of
 $129.99 buried in the noise) — the full, unstripped title correctly
 returned 11 tightly-matched Freshman Phenoms comps instead ($17.50-
 $129.99). Confirmed live before shipping, not assumed.
+
+#### Sold comps everywhere, not just Player Search
+
+Requested directly right after the above shipped: "I want all searches
+to have sold comps verify link and average of eBay sold listings" — not
+just the one-off "Check similar listings" button. `getSoldComps` moved
+out of `lib/playerSearch.ts` into its own `lib/soldComps.ts` (avoiding an
+import cycle: it needs `isBundle`, which needed to move to
+`lib/cardKeywords.ts` too, so both `cardComparison.ts` and `soldComps.ts`
+can use it without depending on each other) and is now called from every
+place a listing gets evaluated:
+
+- `evaluateListing` in `lib/cardComparison.ts` (the manual search page
+  and every watchlist check) — run in parallel with the PriceCharting
+  `findCard` lookup via `Promise.all`, not gated behind it succeeding,
+  since sold history is useful on its own even when there's no
+  PriceCharting match for a listing. Both failures are caught
+  independently (`.catch(() => null)`) so one API being down doesn't
+  break the other.
+- `discoverDeals` in `lib/cardDiscovery.ts` — only for candidates that
+  already clear the underpriced threshold (Discover only ever saves
+  those anyway, so fetching sold comps for filtered-out candidates would
+  be pure waste).
+- The "↻ Refresh reference" action (`app/api/cards/finds/route.ts`) now
+  refreshes sold comps alongside the PriceCharting reference, since
+  they're both snapshots taken at find-time (see "a saved find is a
+  snapshot, not a live view" above).
+
+Every listing/find that gets a match now shows both figures side by
+side. This turned out to be a genuinely useful cross-check beyond what
+was asked for: a real example surfaced immediately in testing — a "2023
+Panini Prizm Draft Picks #57 Ja Morant" listing matched to a $450
+PriceCharting reference ("Choice Nebula" parallel) sitting right next to
+"Sold comps: avg $2.82 across 18 sales" — a 160x gap that's an obvious
+signal the PriceCharting match is wrong, visible at a glance without
+needing to click through and check by hand.
+
+**Cost tradeoff, measured live, not assumed:** every listing now makes
+three external API calls instead of two (eBay search once per query,
+then PriceCharting + sold-comps per listing). A 20-listing search that
+took 3-5 seconds before takes about 11-12 seconds now — confirmed live,
+still comfortably an interactive wait, not a timeout risk for the search
+page. The watchlist's scheduled check (`WATCHLIST_CONCURRENCY = 3`,
+`maxDuration = 60`) is the one place this is worth watching: 3 cards
+running this per-listing work concurrently, each now taking roughly
+2-3x longer per card, could get closer to the 60-second ceiling with a
+large watchlist. Not changed preemptively — no timeout has actually been
+observed — but worth revisiting if one is reported.
 
 ### The keyword-extraction fix — why raw eBay titles make bad search queries
 

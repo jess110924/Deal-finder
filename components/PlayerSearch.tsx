@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { CardCategory } from "@/lib/cardComparison";
 import type { EbayListing } from "@/lib/sources/ebay";
-import type { SoldCompsSummary } from "@/lib/playerSearch";
+import type { SoldCompsSummary } from "@/lib/soldComps";
 
 type PeerState =
   | { status: "loading" }
@@ -49,7 +49,6 @@ export default function PlayerSearch() {
     try {
       const params = new URLSearchParams({
         title: listing.title,
-        category,
         price: String(listing.priceCents / 100),
       });
       const res = await fetch(`/api/cards/peer-check?${params}`);

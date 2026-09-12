@@ -1,10 +1,12 @@
 import { findCard, buildProductUrl, type CardCategory, type CardReference } from "@/lib/sources/pricecharting";
 import { searchListings, findReferenceListing, type EbayListing } from "@/lib/sources/ebay";
 import { saveNewFinds, type ReferenceInfo, type SavedFind } from "@/lib/db";
-import { extractSearchKeywords, extractSerialDenominator } from "@/lib/cardKeywords";
+import { extractSearchKeywords, extractSerialDenominator, isBundle } from "@/lib/cardKeywords";
 import { mapWithConcurrency } from "@/lib/concurrency";
+import { getSoldComps, type SoldCompsSummary } from "@/lib/soldComps";
 
 export type { CardCategory };
+export { isBundle };
 
 // Graded slabs (PSA 10, BGS 9.5, etc.) sell for multiples of a raw card's
 // price. PriceCharting's reference here is ungraded-only, so comparing a
@@ -22,19 +24,6 @@ export function isGraded(condition: string | null): boolean {
   return (condition ?? "").toLowerCase().includes("graded") && !(condition ?? "").toLowerCase().includes("ungraded");
 }
 
-// A "lot of 5" (or similar bundle) listing's price covers multiple cards,
-// not the one being searched for — comparing its total price against a
-// single-card reference price is meaningless, not just ungraded-vs-graded
-// mismatched. Caught this from a real result: a 5-card lot spanning three
-// different products (Hoops, Chronicles, Prizm Emergent) at $350 sitting
-// in results for a Prizm-only search, condition "New" so the grading
-// filter didn't (and shouldn't have) caught it.
-const LOT_PATTERN = /\b(lot of|lot\/|\(\d+\)|\d+[- ]card lot|bundle)\b/i;
-
-export function isBundle(title: string): boolean {
-  return LOT_PATTERN.test(title);
-}
-
 export type CardListingResult = EbayListing & {
   priceDollars: number;
   percentBelowReference: number | null;
@@ -44,6 +33,11 @@ export type CardListingResult = EbayListing & {
   // See the comment on searchUnderpricedCards for why these can't be the
   // same thing.
   reference: ReferenceInfo | null;
+  // Real recent eBay sold prices for this exact listing's title —
+  // independent of (and fetched regardless of whether there's) a
+  // PriceCharting match, since it's useful signal on its own. See
+  // getSoldComps in lib/soldComps.ts.
+  soldComps: SoldCompsSummary | null;
 };
 
 export type CardSearchResult = {
@@ -140,26 +134,32 @@ const LOOKUP_CONCURRENCY = 12;
  * Chrome refractor, a Ja Morant Select card) with the full title +
  * relevance scoring and all still matched correctly — the scorer alone
  * now handles what the stripping used to.
+ *
+ * Real eBay sold comps (getSoldComps, lib/soldComps.ts) are looked up
+ * alongside the PriceCharting match, not gated behind it succeeding —
+ * requested directly ("I want all searches to have sold comps"), and
+ * sold history is useful on its own even when there's no PriceCharting
+ * product match for this listing. Run in parallel with findCard (not
+ * after it) so this doesn't add extra latency on top of the existing
+ * lookup — the two are independent network calls to unrelated services.
  */
 async function evaluateListing(listing: EbayListing, category: CardCategory): Promise<CardListingResult> {
   const priceDollars = listing.priceCents / 100;
 
-  let reference: CardReference | null;
-  try {
-    reference = await findCard(listing.title, category);
-  } catch {
-    reference = null;
-  }
+  const [reference, soldComps] = await Promise.all([
+    findCard(listing.title, category).catch(() => null),
+    getSoldComps(listing.title, priceDollars).catch(() => null),
+  ]);
 
   if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) {
-    return { ...listing, priceDollars, percentBelowReference: null, isUnderpriced: false, reference: null };
+    return { ...listing, priceDollars, percentBelowReference: null, isUnderpriced: false, reference: null, soldComps };
   }
 
   const percentBelowReference = ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
   const isUnderpriced = percentBelowReference >= UNDERPRICED_THRESHOLD_PERCENT;
   const referenceInfo = await buildReferenceInfo(reference, category, false);
 
-  return { ...listing, priceDollars, percentBelowReference, isUnderpriced, reference: referenceInfo };
+  return { ...listing, priceDollars, percentBelowReference, isUnderpriced, reference: referenceInfo, soldComps };
 }
 
 /**
@@ -285,6 +285,7 @@ export async function checkCardAndSaveFinds(card: string, category: CardCategory
       category,
       source: "watchlist",
       reference: l.reference ?? undefined,
+      soldComps: l.soldComps ?? undefined,
       foundAt: new Date().toISOString(),
     }));
   return saveNewFinds(candidates);

@@ -203,6 +203,18 @@ export default function CardSearch() {
                       vs ${listing.reference.ungradedPriceDollars.toFixed(2)} for &quot;{listing.reference.productName}&quot;
                     </a>
                   )}
+                  {listing.soldComps && (
+                    <a
+                      href={listing.soldComps.soldSearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm block mt-1"
+                      style={{ color: "var(--series-1)", textDecoration: "underline" }}
+                    >
+                      Sold comps: avg ${listing.soldComps.averageSoldPriceDollars.toFixed(2)} across{" "}
+                      {listing.soldComps.compCount} sale{listing.soldComps.compCount === 1 ? "" : "s"}
+                    </a>
+                  )}
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                       ${listing.priceDollars.toFixed(2)}

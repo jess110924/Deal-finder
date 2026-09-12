@@ -6,6 +6,7 @@ import {
   buildReferenceInfo,
   type CardCategory,
 } from "@/lib/cardComparison";
+import { getSoldComps } from "@/lib/soldComps";
 import { saveNewFinds, type SavedFind } from "@/lib/db";
 import { mapWithConcurrency } from "@/lib/concurrency";
 
@@ -66,11 +67,15 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
       ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
     if (percentBelowReference < DISCOVERY_THRESHOLD_PERCENT) return null;
 
-    const referenceInfo = await buildReferenceInfo(reference, category, false);
+    const priceDollars = listing.priceCents / 100;
+    const [referenceInfo, soldComps] = await Promise.all([
+      buildReferenceInfo(reference, category, false),
+      getSoldComps(listing.title, priceDollars).catch(() => null),
+    ]);
     return {
       itemId: listing.itemId,
       title: listing.title,
-      priceDollars: listing.priceCents / 100,
+      priceDollars,
       itemWebUrl: listing.itemWebUrl,
       imageUrl: listing.imageUrl,
       condition: listing.condition,
@@ -79,6 +84,7 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
       category,
       source: "discovery",
       reference: referenceInfo,
+      soldComps: soldComps ?? undefined,
       foundAt: new Date().toISOString(),
     };
   });

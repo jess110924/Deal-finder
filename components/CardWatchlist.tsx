@@ -25,6 +25,26 @@ function FindHeroPhoto({ find }: { find: SavedFind }) {
   );
 }
 
+// Shared by Saved finds / My Picks / Mismatches — real recent eBay sold
+// prices for this exact title, independent of the PriceCharting
+// reference above it. Requested directly: "I want all searches to have
+// sold comps verify link and average of eBay sold listings."
+function SoldCompsLine({ find }: { find: SavedFind }) {
+  if (!find.soldComps) return null;
+  return (
+    <a
+      href={find.soldComps.soldSearchUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-sm block mt-1"
+      style={{ color: "var(--series-1)", textDecoration: "underline" }}
+    >
+      Sold comps: avg ${find.soldComps.averageSoldPriceDollars.toFixed(2)} across {find.soldComps.compCount} sale
+      {find.soldComps.compCount === 1 ? "" : "s"}
+    </a>
+  );
+}
+
 export default function CardWatchlist() {
   const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
   const [finds, setFinds] = useState<SavedFind[]>([]);
@@ -457,6 +477,7 @@ export default function CardWatchlist() {
                       Verify: ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
                     </a>
                   )}
+                  <SoldCompsLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                       ${find.priceDollars.toFixed(2)}
@@ -544,6 +565,7 @@ export default function CardWatchlist() {
                       ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
                     </a>
                   )}
+                  <SoldCompsLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                       ${find.priceDollars.toFixed(2)}
@@ -614,6 +636,7 @@ export default function CardWatchlist() {
                       Wrongly matched: ${find.reference.ungradedPriceDollars.toFixed(2)} for &quot;{find.reference.productName}&quot;
                     </a>
                   )}
+                  <SoldCompsLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                       ${find.priceDollars.toFixed(2)}

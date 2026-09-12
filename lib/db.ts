@@ -1,5 +1,6 @@
 import { Redis } from "@upstash/redis";
 import type { CardCategory } from "@/lib/sources/pricecharting";
+import type { SoldCompsSummary } from "@/lib/soldComps";
 
 // Lazily constructed (not at module scope) so importing this file doesn't
 // eagerly instantiate a client — Redis.fromEnv() logs noisy warnings (and
@@ -96,6 +97,10 @@ export type SavedFind = {
   // What this find's price was actually compared against. Optional for
   // the same backward-compatibility reason as `source`.
   reference?: ReferenceInfo;
+  // Real recent eBay sold prices for this exact title, independent of
+  // `reference` — absent on finds saved before this field existed, or
+  // when no sold comps were found for this title.
+  soldComps?: SoldCompsSummary;
   foundAt: string;
 };
 
@@ -135,12 +140,13 @@ export async function saveNewFinds(candidates: SavedFind[]): Promise<number> {
 export async function updateFindReference(
   itemId: string,
   reference: ReferenceInfo,
-  percentBelowReference: number
+  percentBelowReference: number,
+  soldComps?: SoldCompsSummary
 ): Promise<SavedFind | null> {
   const existing = await getFinds();
   const idx = existing.findIndex((f) => f.itemId === itemId);
   if (idx === -1) return null;
-  const updated: SavedFind = { ...existing[idx], reference, percentBelowReference };
+  const updated: SavedFind = { ...existing[idx], reference, percentBelowReference, soldComps };
   const next = [...existing];
   next[idx] = updated;
   await getRedis().set(FINDS_KEY, next);

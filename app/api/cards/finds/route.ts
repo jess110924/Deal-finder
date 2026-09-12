@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getFinds, dismissFind, confirmFind, flagMismatch, updateFindReference } from "@/lib/db";
 import { findCard } from "@/lib/sources/pricecharting";
 import { buildReferenceInfo } from "@/lib/cardComparison";
+import { getSoldComps } from "@/lib/soldComps";
 
 export async function GET() {
   try {
@@ -34,14 +35,17 @@ export async function POST(request: NextRequest) {
       if (!find) {
         return NextResponse.json({ error: "That find isn't in the review queue (already handled?)." }, { status: 404 });
       }
-      const reference = await findCard(find.title, find.category);
+      const [reference, soldComps] = await Promise.all([
+        findCard(find.title, find.category),
+        getSoldComps(find.title, find.priceDollars).catch(() => null),
+      ]);
       if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) {
         return NextResponse.json({ error: "No PriceCharting reference found for this listing right now." }, { status: 502 });
       }
       const referenceInfo = await buildReferenceInfo(reference, find.category, false);
       const percentBelowReference =
         ((reference.ungradedPriceCents - find.priceDollars * 100) / reference.ungradedPriceCents) * 100;
-      const updated = await updateFindReference(itemId, referenceInfo, percentBelowReference);
+      const updated = await updateFindReference(itemId, referenceInfo, percentBelowReference, soldComps ?? undefined);
       return NextResponse.json({ ok: true, find: updated });
     }
 
