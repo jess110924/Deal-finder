@@ -3,12 +3,12 @@
 import { useState } from "react";
 import type { CardCategory } from "@/lib/cardComparison";
 import type { EbayListing } from "@/lib/sources/ebay";
-import type { PeerComparison } from "@/lib/playerSearch";
+import type { SoldCompsSummary } from "@/lib/playerSearch";
 
 type PeerState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "done"; comparison: PeerComparison | null };
+  | { status: "done"; comparison: SoldCompsSummary | null };
 
 export default function PlayerSearch() {
   const [category, setCategory] = useState<CardCategory>("sports");
@@ -47,7 +47,11 @@ export default function PlayerSearch() {
   async function checkPeers(listing: EbayListing) {
     setPeerChecks((prev) => ({ ...prev, [listing.itemId]: { status: "loading" } }));
     try {
-      const params = new URLSearchParams({ title: listing.title, category, subject: query.trim() });
+      const params = new URLSearchParams({
+        title: listing.title,
+        category,
+        price: String(listing.priceCents / 100),
+      });
       const res = await fetch(`/api/cards/peer-check?${params}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
@@ -65,10 +69,8 @@ export default function PlayerSearch() {
         </h2>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
           Search a player, filtered to a price band, instead of one exact card. Pick a listing that looks
-          interesting, then check what other currently-listed copies of that exact card are asking — no eBay API
-          gives access to actual sold prices, so this compares against other active asking prices, not sales
-          history. If a card is priced well below what everyone else is asking for the same one, that's the
-          signal to look closer.
+          interesting, then check what that exact card has actually sold for recently on eBay. If it's priced well
+          below the average recent sold price, that's the signal to look closer.
         </p>
       </div>
 
@@ -213,7 +215,7 @@ export default function PlayerSearch() {
 
                 {peer?.status === "done" && !peer.comparison && (
                   <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                    No other ungraded Buy It Now listings found for this exact title.
+                    No recent sold comps found for this exact title.
                   </div>
                 )}
 
@@ -223,46 +225,49 @@ export default function PlayerSearch() {
                     style={{ background: "var(--surface-2, transparent)", border: "1px solid var(--border-hairline)" }}
                   >
                     <div style={{ color: "var(--text-secondary)" }}>
-                      {peer.comparison.peerCount} matching listing{peer.comparison.peerCount === 1 ? "" : "s"} for
-                      this exact title · average asking ${peer.comparison.averagePriceDollars.toFixed(2)} · lowest $
-                      {peer.comparison.lowestPriceDollars.toFixed(2)}
+                      {peer.comparison.compCount} recent sold comp{peer.comparison.compCount === 1 ? "" : "s"} for this
+                      exact title · average sold ${peer.comparison.averageSoldPriceDollars.toFixed(2)} · median $
+                      {peer.comparison.medianSoldPriceDollars.toFixed(2)}
                     </div>
-                    {peer.comparison.percentLowestBelowAverage > 0 && (
+                    {peer.comparison.percentBelowAverage != null && peer.comparison.percentBelowAverage > 0 && (
                       <div className="font-semibold" style={{ color: "var(--good)" }}>
-                        Lowest is {peer.comparison.percentLowestBelowAverage.toFixed(0)}% below the average asking
-                        price
+                        This listing is {peer.comparison.percentBelowAverage.toFixed(0)}% below the average recent
+                        sold price
                       </div>
                     )}
                     <div className="flex gap-3">
                       <a
-                        href={peer.comparison.lowestListing.itemWebUrl}
+                        href={peer.comparison.mostRecentSale.itemWebUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
                       >
-                        View the lowest-priced listing
+                        View the most recent sale (${peer.comparison.mostRecentSale.soldPriceDollars.toFixed(2)} on{" "}
+                        {peer.comparison.mostRecentSale.endedAt})
                       </a>
                       <button
                         onClick={() => setExpandedPeerList((prev) => ({ ...prev, [listing.itemId]: !prev[listing.itemId] }))}
                         style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
                       >
-                        {expandedPeerList[listing.itemId] ? "Hide" : "Show"} all {peer.comparison.peerCount} — check
+                        {expandedPeerList[listing.itemId] ? "Hide" : "Show"} all {peer.comparison.compCount} — check
                         these are actually the same parallel
                       </button>
                     </div>
                     {expandedPeerList[listing.itemId] && (
                       <div className="flex flex-col gap-1 mt-1">
-                        {peer.comparison.listings.map((peerListing) => (
+                        {peer.comparison.sales.map((sale) => (
                           <a
-                            key={peerListing.itemId}
-                            href={peerListing.itemWebUrl}
+                            key={sale.itemId}
+                            href={sale.itemWebUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex justify-between gap-2"
                             style={{ color: "var(--text-muted)" }}
                           >
-                            <span className="truncate">{peerListing.title}</span>
-                            <span className="shrink-0 tabular-nums">${(peerListing.priceCents / 100).toFixed(2)}</span>
+                            <span className="truncate">
+                              {sale.endedAt} — {sale.title}
+                            </span>
+                            <span className="shrink-0 tabular-nums">${sale.soldPriceDollars.toFixed(2)}</span>
                           </a>
                         ))}
                       </div>

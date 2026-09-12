@@ -1,6 +1,7 @@
 import { searchListings, type EbayListing } from "@/lib/sources/ebay";
+import { fetchSoldComps, isLikelyGraded, type SoldComp } from "@/lib/sources/soldComps";
 import { isGraded, isBundle, type CardCategory } from "@/lib/cardComparison";
-import { extractSearchKeywords, extractSerialDenominator } from "@/lib/cardKeywords";
+import { extractSerialDenominator } from "@/lib/cardKeywords";
 
 /**
  * Step 1 of the manual "browse a player, eyeball the $30-$100 range"
@@ -19,75 +20,76 @@ export async function searchPlayerCards(
   return raw.filter((l) => !isGraded(l.condition) && !isBundle(l.title));
 }
 
-export type PeerComparison = {
+export type SoldCompsSummary = {
   title: string;
-  peerCount: number;
-  averagePriceDollars: number;
-  lowestPriceDollars: number;
-  lowestListing: EbayListing;
-  percentLowestBelowAverage: number;
-  listings: EbayListing[]; // sorted lowest price first
+  compCount: number;
+  averageSoldPriceDollars: number;
+  medianSoldPriceDollars: number;
+  // How this specific listing's own asking price compares to the average
+  // recent sold price — null when priceDollars wasn't supplied.
+  percentBelowAverage: number | null;
+  mostRecentSale: SoldComp;
+  sales: SoldComp[]; // sorted most recent first
 };
 
 /**
- * Step 2: "use that exact title to see what similar listings go for, then
- * compare to the current lowest." No eBay API key gets access to sold/
- * completed listing data (confirmed live: the buy.marketplace.insights
- * scope this would need comes back "invalid_scope" for this app's key,
- * meaning it isn't granted — that's a restricted, separately-approved
- * eBay API most developer accounts don't have), so this compares against
- * other *currently active* asking prices for the same exact card instead
- * of recent sold prices. Close to the same shape, but a real caveat: if
- * every seller of a card happens to be overpricing it right now, this
- * baseline is inflated right along with them — it's an asking-price
- * average, not a sold-price one.
+ * Step 2: "check what this exact card has actually sold for recently,"
+ * using real sold history (`SOLD_COMPS_API_KEY`, a paid third-party
+ * scraper API) instead of other active asking prices — a real upgrade
+ * over comparing asking prices against each other, which is all that was
+ * possible before: no eBay API key here gets access to actual sold/
+ * completed listing data (confirmed live: the `buy.marketplace.insights`
+ * scope this would need comes back "invalid_scope" for this app's key).
  *
- * Two layers of protection against a broad title search pulling in the
- * wrong parallel — confirmed live this is a real risk, not theoretical:
- * a raw "q=<full title>" search for a Gold Wave Prizm pulled in a
- * completely different, much cheaper Blue Shimmer Prizm just because both
- * titles say "Prizm", and even quoting just the distinctive phrase
- * ("Blue Refractor") still pulled in a different, far more common
- * "Red White & Blue Refractor" parallel since that phrase contains it as
- * a substring. (1) `extractSearchKeywords` narrows the search query
- * itself using the known subject (passed in from the Player Search box)
- * plus whatever color/finish words identify the parallel. (2) When the
- * title has a print-run denominator ("/150"), candidates are additionally
- * required to carry that same denominator — confirmed live this cleanly
- * separates real peers from same-named-but-different parallels that
- * don't share it.
+ * Searches with the listing's full raw title, not a keyword-stripped
+ * version — confirmed live this matters, the same lesson learned earlier
+ * in this project for PriceCharting matching (see cardComparison.ts):
+ * this API does its own eBay-style relevance ranking, so stripping the
+ * query down to "Luka Doncic silver prizm" for a "Freshman Phenoms"
+ * insert actually made results *worse* — 21 loosely-related "Silver
+ * Prizm" comps spanning many unrelated years/sets ($0.45-$129.99, median
+ * $3) vs. 11 tightly-matched Freshman Phenoms comps ($17.50-$129.99) when
+ * searching with the full title instead. The print-run denominator
+ * filter below is a second, independent safety net on top of that.
  */
-export async function comparePeerListings(
+export async function getSoldComps(
   title: string,
   category: CardCategory,
-  knownSubject?: string | null
-): Promise<PeerComparison | null> {
-  const query = extractSearchKeywords(title, knownSubject);
-  const raw = await searchListings(query, category, { limit: 30 });
-  let listings = raw.filter((l) => !isGraded(l.condition) && !isBundle(l.title));
+  priceDollars: number | null
+): Promise<SoldCompsSummary | null> {
+  const raw = await fetchSoldComps(title);
+  let sales = raw.filter((c) => !isLikelyGraded(c.title) && !isBundle(c.title));
 
   const serial = extractSerialDenominator(title);
   if (serial) {
-    const withSerial = listings.filter((l) => l.title.includes(serial));
+    const withSerial = sales.filter((c) => c.title.includes(serial));
     // Only trust the narrower set if it actually found something —
     // otherwise this falls back to the unfiltered list rather than
     // returning nothing just because of formatting differences.
-    if (withSerial.length > 0) listings = withSerial;
+    if (withSerial.length > 0) sales = withSerial;
   }
 
-  if (listings.length === 0) return null;
+  if (sales.length === 0) return null;
 
-  const sorted = [...listings].sort((a, b) => a.priceCents - b.priceCents);
-  const averageCents = listings.reduce((sum, l) => sum + l.priceCents, 0) / listings.length;
-  const lowest = sorted[0];
+  const sortedByDate = [...sales].sort((a, b) => (a.endedAt < b.endedAt ? 1 : a.endedAt > b.endedAt ? -1 : 0));
+  const sortedByPrice = [...sales].sort((a, b) => a.soldPriceDollars - b.soldPriceDollars);
+  const averageSoldPriceDollars = sales.reduce((sum, c) => sum + c.soldPriceDollars, 0) / sales.length;
+  const mid = Math.floor(sortedByPrice.length / 2);
+  const medianSoldPriceDollars =
+    sortedByPrice.length % 2 === 0
+      ? (sortedByPrice[mid - 1].soldPriceDollars + sortedByPrice[mid].soldPriceDollars) / 2
+      : sortedByPrice[mid].soldPriceDollars;
 
   return {
     title,
-    peerCount: listings.length,
-    averagePriceDollars: averageCents / 100,
-    lowestPriceDollars: lowest.priceCents / 100,
-    lowestListing: lowest,
-    percentLowestBelowAverage: averageCents > 0 ? ((averageCents - lowest.priceCents) / averageCents) * 100 : 0,
-    listings: sorted,
+    compCount: sales.length,
+    averageSoldPriceDollars,
+    medianSoldPriceDollars,
+    percentBelowAverage:
+      priceDollars != null && averageSoldPriceDollars > 0
+        ? ((averageSoldPriceDollars - priceDollars) / averageSoldPriceDollars) * 100
+        : null,
+    mostRecentSale: sortedByDate[0],
+    sales: sortedByDate,
   };
 }

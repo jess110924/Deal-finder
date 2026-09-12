@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { comparePeerListings } from "@/lib/playerSearch";
+import { getSoldComps } from "@/lib/playerSearch";
 import type { CardCategory } from "@/lib/cardComparison";
 
 export async function GET(request: NextRequest) {
@@ -9,10 +9,11 @@ export async function GET(request: NextRequest) {
   }
   const categoryParam = request.nextUrl.searchParams.get("category");
   const category: CardCategory = categoryParam === "pokemon" ? "pokemon" : "sports";
-  const subject = request.nextUrl.searchParams.get("subject")?.trim() || null;
+  const priceParam = request.nextUrl.searchParams.get("price");
+  const priceDollars = priceParam ? Number(priceParam) : null;
 
   try {
-    const comparison = await comparePeerListings(title, category, subject);
+    const comparison = await getSoldComps(title, category, Number.isFinite(priceDollars) ? priceDollars : null);
     return NextResponse.json({ comparison });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

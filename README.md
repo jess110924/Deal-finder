@@ -35,16 +35,21 @@ and let real graded slabs slip through undetected.
 
 ### Setup
 
-Needs two things in `.env`:
+Needs these in `.env`:
 
 ```
 PRICECHARTING_API_KEY=your-existing-key
 EBAY_CLIENT_ID=...
 EBAY_CLIENT_SECRET=...
+SOLD_COMPS_API_KEY=...
 ```
 
 Get the eBay credentials free at [developer.ebay.com](https://developer.ebay.com) →
 Application Keys → use the **Production** App ID and Cert ID (not Sandbox).
+`SOLD_COMPS_API_KEY` is a paid third-party key (api.sold-comps.com) — see
+"Player Search's sold comps" below for what it's used for. Whichever
+environment runs the app needs its own copy of these (a local `.env` for
+`npm run dev`, Vercel's project environment variables for production).
 
 ### An important gotcha this was built around: pricecharting.com vs sportscardspro.com
 
@@ -373,14 +378,43 @@ first part as a plain price-banded eBay browse (no PriceCharting
 reference — a player name isn't one product) and the second as an
 on-demand "Check similar listings" button per result.
 
-The "similar listings" comparison is against other **currently active**
-asking prices, not recent sold prices — no eBay API key gets access to
-sold/completed listing data (confirmed live: the scope that would need,
+#### Player Search's sold comps — real sold prices, not asking prices
+
+"Check similar listings" originally compared against other **currently
+active** asking prices, since no eBay API key here gets access to sold/
+completed listing data (confirmed live: the scope that would need,
 `buy.marketplace.insights`, comes back `invalid_scope` for this app's
-key — it's a separately-approved, restricted API most developer accounts
-don't have). A real caveat worth remembering: if every seller of a card
-happens to be overpricing it right now, this baseline is inflated right
-along with them.
+key — a separately-approved, restricted API most developer accounts
+don't have). The user supplied a paid third-party key for
+[api.sold-comps.com](https://sold-comps.com) (`SOLD_COMPS_API_KEY`, a
+scraper that returns real eBay sold history), so this now uses actual
+recent sold prices instead — a real upgrade, not a workaround: if every
+active seller of a card happens to be overpricing it right now, asking
+prices are inflated right along with them, but sold prices aren't.
+
+`lib/sources/soldComps.ts` wraps the API (`fetchSoldComps`); `getSoldComps`
+in `lib/playerSearch.ts` filters out graded slabs and bundles, applies
+the print-run-denominator safety net (same pattern used elsewhere in this
+project), and returns a `SoldCompsSummary` — comp count, average/median
+sold price, the most recent sale, and the full list. The route
+(`app/api/cards/peer-check`) also takes the listing's own asking price
+now, so the response can say directly "this listing is N% below the
+average recent sold price" instead of only comparing peers to each other.
+
+**A real bug caught immediately, same lesson as the PriceCharting fix
+earlier in this project:** the API's own condition/conditionId fields
+don't reliably separate graded slabs from raw cards (a PSA 10 came back
+as plain "New (Other)", confirmed live) — grading is detected from the
+title instead (`isLikelyGraded` in `lib/sources/soldComps.ts`), on the
+theory that a raw card's title has no reason to mention a grading
+company at all. And exactly like `findCard`'s query-stripping bug: this
+API has no relevance scoring of its own, so feeding it a keyword-stripped
+query ("Luka Doncic silver prizm") for a "2018-19 Panini Prizm - Freshman
+Phenoms Luka Doncic #23 Silver Prizm" pulled in 21 loosely-related Silver
+Prizm comps spanning unrelated years/sets (median $3, one real sale of
+$129.99 buried in the noise) — the full, unstripped title correctly
+returned 11 tightly-matched Freshman Phenoms comps instead ($17.50-
+$129.99). Confirmed live before shipping, not assumed.
 
 ### The keyword-extraction fix — why raw eBay titles make bad search queries
 
