@@ -118,6 +118,23 @@ trusting it. Finds saved before `productUrl` existed fall back to the
 older eBay-sourced links (the field is optional on `ReferenceInfo` for
 exactly this reason).
 
+**Photos side by side, not just a link.** Requested directly: comparing
+by eyeballing a photo, without having to open the reference link on every
+row to check it. Every listing row (search page and all three watchlist
+lists) now shows the listing's own photo next to its reference's photo,
+same size, at roughly a third of a mobile screen's width each — big
+enough to actually compare, not a tiny inline icon. This changed the cost
+math for `evaluateListing` in `lib/cardComparison.ts`: the reference photo
+used to only get fetched (one extra eBay call) for listings that cleared
+the underpriced threshold, since non-underpriced ones were never shown
+anywhere. Now the interactive search page shows every listing regardless
+of underpriced status, so it needs the photo for all of them —
+`searchUnderpricedCards` takes a new `includeAllListingImages` flag for
+this, on only for `/api/cards/search` (a user is looking at the page).
+The watchlist's background check and Discover both leave it off: they
+still only ever show/save the underpriced ones, so fetching a photo for
+everything else checked would be pure waste with nothing gained.
+
 ### Watchlist — automatic background checking
 
 Beyond the one-off manual search above, `/cards` also has a **watchlist**:

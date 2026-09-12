@@ -107,14 +107,14 @@ export default function CardSearch() {
             style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
           >
             {result.reference ? (
-              <div className="flex gap-3 items-center">
+              <div className="flex gap-4 items-center">
                 {result.reference.imageUrl && (
                   <a href={result.reference.itemWebUrl ?? result.reference.ebaySearchUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={result.reference.imageUrl}
                       alt=""
-                      className="w-16 h-16 rounded-md object-contain"
+                      className="w-28 h-28 rounded-lg object-contain"
                       style={{ background: "#fff", border: "1px solid var(--border-hairline)" }}
                     />
                   </a>
@@ -123,8 +123,8 @@ export default function CardSearch() {
                   <div className="text-sm" style={{ color: "var(--text-muted)" }}>
                     Closest PriceCharting match for this search (ungraded)
                   </div>
-                  <div className="font-medium" style={{ color: "var(--text-primary)" }}>{result.reference.productName}</div>
-                  <div className="text-xl font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
+                  <div className="font-medium text-lg" style={{ color: "var(--text-primary)" }}>{result.reference.productName}</div>
+                  <div className="text-2xl font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
                     ${result.reference.ungradedPriceDollars.toFixed(2)}
                   </div>
                   <a
@@ -163,47 +163,91 @@ export default function CardSearch() {
             {result.listings.map((listing) => (
               <div
                 key={listing.itemId}
-                className="rounded-lg p-3 flex gap-3 items-center"
+                className="rounded-lg p-3 flex flex-col gap-3"
                 style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
               >
-                {listing.imageUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={listing.imageUrl} alt="" className="w-14 h-14 rounded-md object-contain shrink-0" style={{ background: "#fff" }} />
-                )}
-                <div className="flex-1 min-w-0">
+                <div className="flex gap-3">
+                  <a href={listing.itemWebUrl} target="_blank" rel="noopener noreferrer" className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                    {listing.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={listing.imageUrl}
+                        alt=""
+                        className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg object-contain"
+                        style={{ background: "#fff", border: "1px solid var(--border-hairline)" }}
+                      />
+                    ) : (
+                      <div
+                        className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg flex items-center justify-center text-xs"
+                        style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
+                      >
+                        No photo
+                      </div>
+                    )}
+                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>Listing</span>
+                  </a>
                   <a
-                    href={listing.itemWebUrl}
+                    href={listing.reference?.productUrl ?? listing.reference?.itemWebUrl ?? listing.reference?.ebaySearchUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm hover:underline"
-                    style={{ color: "var(--text-primary)" }}
+                    className="flex-1 flex flex-col items-center gap-1 min-w-0"
+                    style={{ visibility: listing.reference ? "visible" : "hidden" }}
                   >
-                    {listing.title}
+                    {listing.reference?.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={listing.reference.imageUrl}
+                        alt=""
+                        className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg object-contain"
+                        style={{ background: "#fff", border: "1px solid var(--series-1)" }}
+                      />
+                    ) : (
+                      <div
+                        className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg flex items-center justify-center text-xs text-center px-2"
+                        style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
+                      >
+                        No photo available
+                      </div>
+                    )}
+                    <span className="text-xs" style={{ color: "var(--series-1)" }}>Verify (PriceCharting)</span>
                   </a>
-                  {listing.condition && (
-                    <div className="text-xs" style={{ color: "var(--text-muted)" }}>{listing.condition}</div>
-                  )}
-                  {listing.reference && (
+                </div>
+                <div className="flex gap-3 items-center">
+                  <div className="flex-1 min-w-0">
                     <a
-                      href={listing.reference.productUrl ?? listing.reference.itemWebUrl ?? listing.reference.ebaySearchUrl}
+                      href={listing.itemWebUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs block mt-0.5"
-                      style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                      className="text-base hover:underline"
+                      style={{ color: "var(--text-primary)" }}
                     >
-                      vs ${listing.reference.ungradedPriceDollars.toFixed(2)} for &quot;{listing.reference.productName}&quot;
+                      {listing.title}
                     </a>
-                  )}
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className="font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
-                    ${listing.priceDollars.toFixed(2)}
-                  </span>
-                  {listing.isUnderpriced && (
-                    <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                      {listing.percentBelowReference!.toFixed(0)}% under reference
+                    {listing.condition && (
+                      <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{listing.condition}</div>
+                    )}
+                    {listing.reference && (
+                      <a
+                        href={listing.reference.productUrl ?? listing.reference.itemWebUrl ?? listing.reference.ebaySearchUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm block mt-1"
+                        style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                      >
+                        vs ${listing.reference.ungradedPriceDollars.toFixed(2)} for &quot;{listing.reference.productName}&quot;
+                      </a>
+                    )}
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
+                      ${listing.priceDollars.toFixed(2)}
                     </span>
-                  )}
+                    {listing.isUnderpriced && (
+                      <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
+                        {listing.percentBelowReference!.toFixed(0)}% under reference
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

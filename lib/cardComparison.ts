@@ -113,9 +113,13 @@ const LOOKUP_CONCURRENCY = 12;
  * that only share a player's name.
  *
  * The eBay photo lookup inside buildReferenceInfo (one extra API call)
- * only runs for listings that actually end up flagged underpriced —
- * running it for all ~30 listings on every search would be needlessly
- * expensive for the ones nobody will ever look twice at.
+ * always runs for a listing that will actually be shown to a user in an
+ * interactive search (`includeAllImages`) — requested directly: seeing
+ * the reference's own photo next to the listing is how a user compares
+ * them without opening a link. It stays gated to underpriced-only for
+ * the unattended watchlist/discovery paths, where non-underpriced
+ * listings are discarded immediately and never shown to anyone, so
+ * fetching their photo would just be wasted API calls.
  *
  * Looks up the listing's OWN raw title, not an extractSearchKeywords-
  * stripped version. That stripping predates findCard's relevance scoring
@@ -130,7 +134,11 @@ const LOOKUP_CONCURRENCY = 12;
  * relevance scoring and all still matched correctly — the scorer alone
  * now handles what the stripping used to.
  */
-async function evaluateListing(listing: EbayListing, category: CardCategory): Promise<CardListingResult> {
+async function evaluateListing(
+  listing: EbayListing,
+  category: CardCategory,
+  includeAllImages: boolean
+): Promise<CardListingResult> {
   const priceDollars = listing.priceCents / 100;
 
   let reference: CardReference | null;
@@ -146,7 +154,7 @@ async function evaluateListing(listing: EbayListing, category: CardCategory): Pr
 
   const percentBelowReference = ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
   const isUnderpriced = percentBelowReference >= UNDERPRICED_THRESHOLD_PERCENT;
-  const referenceInfo = await buildReferenceInfo(listing.title, reference, category, isUnderpriced);
+  const referenceInfo = await buildReferenceInfo(listing.title, reference, category, includeAllImages || isUnderpriced);
 
   return { ...listing, priceDollars, percentBelowReference, isUnderpriced, reference: referenceInfo };
 }
@@ -157,11 +165,19 @@ async function evaluateListing(listing: EbayListing, category: CardCategory): Pr
  * `query`, shown for context) — pass false to skip it when that summary
  * won't be displayed (e.g. the watchlist, which no longer uses it for
  * the underpriced determination at all, see evaluateListing above).
+ *
+ * `includeAllListingImages` does the same for every individual listing's
+ * own reference photo, not just the top summary — pass true for an
+ * interactive search page where a user will actually look at each row
+ * (so they can compare photos without opening a link), false for the
+ * unattended watchlist/discovery checks where non-underpriced listings
+ * are discarded and never shown to anyone.
  */
 export async function searchUnderpricedCards(
   query: string,
   category: CardCategory,
-  includeReferenceImage = false
+  includeReferenceImage = false,
+  includeAllListingImages = false
 ): Promise<CardSearchResult> {
   // Only rewrite the query when it carries a print-run denominator
   // ("/150") — a strong, safe signal this is a pasted-in raw eBay title
@@ -215,7 +231,9 @@ export async function searchUnderpricedCards(
   // the actual fix for a real reported bug. Bounded concurrency for the
   // same reason Discover uses it: sequential would be far too slow for a
   // search returning up to 30 listings.
-  const listings = await mapWithConcurrency(ungradedListings, LOOKUP_CONCURRENCY, (l) => evaluateListing(l, category));
+  const listings = await mapWithConcurrency(ungradedListings, LOOKUP_CONCURRENCY, (l) =>
+    evaluateListing(l, category, includeAllListingImages)
+  );
 
   // Best deals (most below reference) first, then everything else by price.
   listings.sort((a, b) => {

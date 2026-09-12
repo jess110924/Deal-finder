@@ -6,6 +6,62 @@ import type { CardCategory } from "@/lib/cardComparison";
 
 const CATEGORY_LABEL: Record<CardCategory, string> = { sports: "Sports", pokemon: "Pokémon" };
 
+// Shared by Saved finds / My Picks / Mismatches — same "photos side by
+// side, details below" layout as the manual search page, so a listing's
+// own photo and its PriceCharting reference photo can be compared
+// directly without opening either link. Requested directly: bigger
+// photos, and the reference photo shown (not just a tiny inline icon).
+function FindPhotoRow({ find, borderColor }: { find: SavedFind; borderColor: string }) {
+  return (
+    <div className="flex gap-3">
+      <a href={find.itemWebUrl} target="_blank" rel="noopener noreferrer" className="flex-1 flex flex-col items-center gap-1 min-w-0">
+        {find.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={find.imageUrl}
+            alt=""
+            className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg object-contain"
+            style={{ background: "#fff", border: "1px solid var(--border-hairline)" }}
+          />
+        ) : (
+          <div
+            className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg flex items-center justify-center text-xs"
+            style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
+          >
+            No photo
+          </div>
+        )}
+        <span className="text-xs" style={{ color: "var(--text-muted)" }}>Listing</span>
+      </a>
+      <a
+        href={find.reference?.productUrl ?? find.reference?.itemWebUrl ?? find.reference?.ebaySearchUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex-1 flex flex-col items-center gap-1 min-w-0"
+        style={{ visibility: find.reference ? "visible" : "hidden" }}
+      >
+        {find.reference?.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={find.reference.imageUrl}
+            alt=""
+            className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg object-contain"
+            style={{ background: "#fff", border: `1px solid ${borderColor}` }}
+          />
+        ) : (
+          <div
+            className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg flex items-center justify-center text-xs text-center px-2"
+            style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
+          >
+            No photo available
+          </div>
+        )}
+        <span className="text-xs" style={{ color: borderColor }}>Verify (PriceCharting)</span>
+      </a>
+    </div>
+  );
+}
+
 export default function CardWatchlist() {
   const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
   const [finds, setFinds] = useState<SavedFind[]>([]);
@@ -373,72 +429,67 @@ export default function CardWatchlist() {
           {finds.map((find) => (
             <div
               key={find.itemId}
-              className="rounded-lg p-3 flex gap-3 items-center"
+              className="rounded-lg p-3 flex flex-col gap-3"
               style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
             >
-              {find.imageUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={find.imageUrl} alt="" className="w-14 h-14 rounded-md object-contain shrink-0" style={{ background: "#fff" }} />
-              )}
-              <div className="flex-1 min-w-0">
-                <a
-                  href={find.itemWebUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm hover:underline"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {find.title}
-                </a>
-                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  {find.category && `${CATEGORY_LABEL[find.category]} · `}
-                  {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
-                </div>
-                {find.reference && (
+              <FindPhotoRow find={find} borderColor="var(--series-1)" />
+              <div className="flex gap-3 items-center">
+                <div className="flex-1 min-w-0">
                   <a
-                    // productUrl (the reference's own PriceCharting/
-                    // SportsCardsPro page) is the primary target — it's
-                    // the actual source the reference price came from.
-                    // Older saved finds predate this field, so fall back
-                    // to the eBay-sourced links for those.
-                    href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                    href={find.itemWebUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs flex items-center gap-1 mt-1"
-                    style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                    className="text-base hover:underline"
+                    style={{ color: "var(--text-primary)" }}
                   >
-                    {find.reference.imageUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={find.reference.imageUrl} alt="" className="w-4 h-4 rounded object-contain" style={{ background: "#fff" }} />
-                    )}
-                    Verify: ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
+                    {find.title}
                   </a>
-                )}
-              </div>
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <span className="font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
-                  ${find.priceDollars.toFixed(2)}
-                </span>
-                <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                  {find.percentBelowReference.toFixed(0)}% under reference
-                </span>
-                <button
-                  onClick={() => triageFind(find, "confirm")}
-                  className="text-xs font-medium"
-                  style={{ color: "var(--good)" }}
-                >
-                  ✓ Save as pick
-                </button>
-                <button
-                  onClick={() => triageFind(find, "flag")}
-                  className="text-xs font-medium"
-                  style={{ color: "var(--critical)" }}
-                >
-                  ⚠ Flag mismatch
-                </button>
-                <button onClick={() => dismissFind(find.itemId)} className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  Dismiss
-                </button>
+                  <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                    {find.category && `${CATEGORY_LABEL[find.category]} · `}
+                    {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
+                  </div>
+                  {find.reference && (
+                    <a
+                      // productUrl (the reference's own PriceCharting/
+                      // SportsCardsPro page) is the primary target — it's
+                      // the actual source the reference price came from.
+                      // Older saved finds predate this field, so fall back
+                      // to the eBay-sourced links for those.
+                      href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm block mt-1"
+                      style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                    >
+                      Verify: ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
+                    </a>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
+                    ${find.priceDollars.toFixed(2)}
+                  </span>
+                  <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
+                    {find.percentBelowReference.toFixed(0)}% under reference
+                  </span>
+                  <button
+                    onClick={() => triageFind(find, "confirm")}
+                    className="text-xs font-medium"
+                    style={{ color: "var(--good)" }}
+                  >
+                    ✓ Save as pick
+                  </button>
+                  <button
+                    onClick={() => triageFind(find, "flag")}
+                    className="text-xs font-medium"
+                    style={{ color: "var(--critical)" }}
+                  >
+                    ⚠ Flag mismatch
+                  </button>
+                  <button onClick={() => dismissFind(find.itemId)} className="text-xs" style={{ color: "var(--text-muted)" }}>
+                    Dismiss
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -461,57 +512,52 @@ export default function CardWatchlist() {
           {confirmed.map((find) => (
             <div
               key={find.itemId}
-              className="rounded-lg p-3 flex gap-3 items-center"
+              className="rounded-lg p-3 flex flex-col gap-3"
               style={{ background: "var(--surface-1)", border: "1px solid var(--good)" }}
             >
-              {find.imageUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={find.imageUrl} alt="" className="w-14 h-14 rounded-md object-contain shrink-0" style={{ background: "#fff" }} />
-              )}
-              <div className="flex-1 min-w-0">
-                <a
-                  href={find.itemWebUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm hover:underline"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {find.title}
-                </a>
-                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  {find.category && `${CATEGORY_LABEL[find.category]} · `}
-                  {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
-                </div>
-                {find.reference && (
+              <FindPhotoRow find={find} borderColor="var(--good)" />
+              <div className="flex gap-3 items-center">
+                <div className="flex-1 min-w-0">
                   <a
-                    href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                    href={find.itemWebUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs flex items-center gap-1 mt-1"
-                    style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                    className="text-base hover:underline"
+                    style={{ color: "var(--text-primary)" }}
                   >
-                    {find.reference.imageUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={find.reference.imageUrl} alt="" className="w-4 h-4 rounded object-contain" style={{ background: "#fff" }} />
-                    )}
-                    ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
+                    {find.title}
                   </a>
-                )}
-              </div>
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <span className="font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
-                  ${find.priceDollars.toFixed(2)}
-                </span>
-                <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                  {find.percentBelowReference.toFixed(0)}% under reference
-                </span>
-                <button
-                  onClick={() => removeFromList(find.itemId, "confirmed")}
-                  className="text-xs"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  Remove
-                </button>
+                  <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                    {find.category && `${CATEGORY_LABEL[find.category]} · `}
+                    {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
+                  </div>
+                  {find.reference && (
+                    <a
+                      href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm block mt-1"
+                      style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                    >
+                      ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
+                    </a>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
+                    ${find.priceDollars.toFixed(2)}
+                  </span>
+                  <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
+                    {find.percentBelowReference.toFixed(0)}% under reference
+                  </span>
+                  <button
+                    onClick={() => removeFromList(find.itemId, "confirmed")}
+                    className="text-xs"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -536,54 +582,49 @@ export default function CardWatchlist() {
           {mismatches.map((find) => (
             <div
               key={find.itemId}
-              className="rounded-lg p-3 flex gap-3 items-center"
+              className="rounded-lg p-3 flex flex-col gap-3"
               style={{ background: "var(--surface-1)", border: "1px solid var(--critical)" }}
             >
-              {find.imageUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={find.imageUrl} alt="" className="w-14 h-14 rounded-md object-contain shrink-0" style={{ background: "#fff" }} />
-              )}
-              <div className="flex-1 min-w-0">
-                <a
-                  href={find.itemWebUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm hover:underline"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {find.title}
-                </a>
-                <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  {find.category && `${CATEGORY_LABEL[find.category]} · `}
-                  {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
-                </div>
-                {find.reference && (
+              <FindPhotoRow find={find} borderColor="var(--critical)" />
+              <div className="flex gap-3 items-center">
+                <div className="flex-1 min-w-0">
                   <a
-                    href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                    href={find.itemWebUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs flex items-center gap-1 mt-1"
-                    style={{ color: "var(--critical)", textDecoration: "underline" }}
+                    className="text-base hover:underline"
+                    style={{ color: "var(--text-primary)" }}
                   >
-                    {find.reference.imageUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={find.reference.imageUrl} alt="" className="w-4 h-4 rounded object-contain" style={{ background: "#fff" }} />
-                    )}
-                    Wrongly matched: ${find.reference.ungradedPriceDollars.toFixed(2)} for &quot;{find.reference.productName}&quot;
+                    {find.title}
                   </a>
-                )}
-              </div>
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <span className="font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
-                  ${find.priceDollars.toFixed(2)}
-                </span>
-                <button
-                  onClick={() => removeFromList(find.itemId, "mismatches")}
-                  className="text-xs"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  Clear
-                </button>
+                  <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                    {find.category && `${CATEGORY_LABEL[find.category]} · `}
+                    {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
+                  </div>
+                  {find.reference && (
+                    <a
+                      href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm block mt-1"
+                      style={{ color: "var(--critical)", textDecoration: "underline" }}
+                    >
+                      Wrongly matched: ${find.reference.ungradedPriceDollars.toFixed(2)} for &quot;{find.reference.productName}&quot;
+                    </a>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
+                    ${find.priceDollars.toFixed(2)}
+                  </span>
+                  <button
+                    onClick={() => removeFromList(find.itemId, "mismatches")}
+                    className="text-xs"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
             </div>
           ))}
