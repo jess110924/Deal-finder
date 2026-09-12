@@ -6,59 +6,56 @@ import type { CardCategory } from "@/lib/cardComparison";
 
 const CATEGORY_LABEL: Record<CardCategory, string> = { sports: "Sports", pokemon: "Pokémon" };
 
-// Shared by Saved finds / My Picks / Mismatches — same "photos side by
-// side, details below" layout as the manual search page, so a listing's
-// own photo and its PriceCharting reference photo can be compared
-// directly without opening either link. Requested directly: bigger
-// photos, and the reference photo shown (not just a tiny inline icon).
-function FindPhotoRow({ find, borderColor }: { find: SavedFind; borderColor: string }) {
+// Shared by Saved finds / My Picks / Mismatches — a big edge-to-edge
+// listing photo up top (like the manual search page), so the card reads
+// like a photo post rather than a link with a thumbnail. Requested
+// directly: bigger photos.
+function FindHeroPhoto({ find }: { find: SavedFind }) {
   return (
-    <div className="flex gap-3">
-      <a href={find.itemWebUrl} target="_blank" rel="noopener noreferrer" className="flex-1 flex flex-col items-center gap-1 min-w-0">
-        {find.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={find.imageUrl}
-            alt=""
-            className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg object-contain"
-            style={{ background: "#fff", border: "1px solid var(--border-hairline)" }}
-          />
-        ) : (
-          <div
-            className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg flex items-center justify-center text-xs"
-            style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
-          >
-            No photo
-          </div>
-        )}
-        <span className="text-xs" style={{ color: "var(--text-muted)" }}>Listing</span>
-      </a>
-      <a
-        href={find.reference?.productUrl ?? find.reference?.itemWebUrl ?? find.reference?.ebaySearchUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex-1 flex flex-col items-center gap-1 min-w-0"
-        style={{ visibility: find.reference ? "visible" : "hidden" }}
-      >
-        {find.reference?.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={find.reference.imageUrl}
-            alt=""
-            className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg object-contain"
-            style={{ background: "#fff", border: `1px solid ${borderColor}` }}
-          />
-        ) : (
-          <div
-            className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg flex items-center justify-center text-xs text-center px-2"
-            style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
-          >
-            No photo available
-          </div>
-        )}
-        <span className="text-xs" style={{ color: borderColor }}>Verify (PriceCharting)</span>
-      </a>
-    </div>
+    <a href={find.itemWebUrl} target="_blank" rel="noopener noreferrer" className="block">
+      {find.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={find.imageUrl} alt="" className="w-full aspect-square object-contain" style={{ background: "#fff" }} />
+      ) : (
+        <div className="w-full aspect-square flex items-center justify-center text-sm" style={{ background: "#fff", color: "var(--text-muted)" }}>
+          No photo
+        </div>
+      )}
+    </a>
+  );
+}
+
+// A small reference-photo thumbnail placed right next to the title/price
+// details below the hero photo — requested directly: the PriceCharting
+// reference's own photo shown next to the listing, so the two can be
+// compared by eye without opening the "Verify" link.
+function FindReferenceThumb({ find, borderColor }: { find: SavedFind; borderColor: string }) {
+  return (
+    <a
+      href={find.reference?.productUrl ?? find.reference?.itemWebUrl ?? find.reference?.ebaySearchUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex flex-col items-center gap-1 shrink-0"
+      style={{ visibility: find.reference ? "visible" : "hidden" }}
+    >
+      {find.reference?.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={find.reference.imageUrl}
+          alt=""
+          className="w-20 h-20 rounded-md object-contain"
+          style={{ background: "#fff", border: `1px solid ${borderColor}` }}
+        />
+      ) : (
+        <div
+          className="w-20 h-20 rounded-md flex items-center justify-center text-[10px] text-center px-1"
+          style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
+        >
+          No photo
+        </div>
+      )}
+      <span className="text-[10px] leading-none" style={{ color: borderColor }}>Verify</span>
+    </a>
   );
 }
 
@@ -429,11 +426,12 @@ export default function CardWatchlist() {
           {finds.map((find) => (
             <div
               key={find.itemId}
-              className="rounded-lg p-3 flex flex-col gap-3"
+              className="rounded-lg overflow-hidden flex flex-col"
               style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
             >
-              <FindPhotoRow find={find} borderColor="var(--series-1)" />
-              <div className="flex gap-3 items-center">
+              <FindHeroPhoto find={find} />
+              <div className="p-3 flex gap-3">
+                <FindReferenceThumb find={find} borderColor="var(--series-1)" />
                 <div className="flex-1 min-w-0">
                   <a
                     href={find.itemWebUrl}
@@ -464,31 +462,31 @@ export default function CardWatchlist() {
                       Verify: ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
                     </a>
                   )}
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
-                    ${find.priceDollars.toFixed(2)}
-                  </span>
-                  <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                    {find.percentBelowReference.toFixed(0)}% under reference
-                  </span>
-                  <button
-                    onClick={() => triageFind(find, "confirm")}
-                    className="text-xs font-medium"
-                    style={{ color: "var(--good)" }}
-                  >
-                    ✓ Save as pick
-                  </button>
-                  <button
-                    onClick={() => triageFind(find, "flag")}
-                    className="text-xs font-medium"
-                    style={{ color: "var(--critical)" }}
-                  >
-                    ⚠ Flag mismatch
-                  </button>
-                  <button onClick={() => dismissFind(find.itemId)} className="text-xs" style={{ color: "var(--text-muted)" }}>
-                    Dismiss
-                  </button>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
+                    <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
+                      ${find.priceDollars.toFixed(2)}
+                    </span>
+                    <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
+                      {find.percentBelowReference.toFixed(0)}% under reference
+                    </span>
+                    <button
+                      onClick={() => triageFind(find, "confirm")}
+                      className="text-xs font-medium"
+                      style={{ color: "var(--good)" }}
+                    >
+                      ✓ Save as pick
+                    </button>
+                    <button
+                      onClick={() => triageFind(find, "flag")}
+                      className="text-xs font-medium"
+                      style={{ color: "var(--critical)" }}
+                    >
+                      ⚠ Flag mismatch
+                    </button>
+                    <button onClick={() => dismissFind(find.itemId)} className="text-xs" style={{ color: "var(--text-muted)" }}>
+                      Dismiss
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -512,11 +510,12 @@ export default function CardWatchlist() {
           {confirmed.map((find) => (
             <div
               key={find.itemId}
-              className="rounded-lg p-3 flex flex-col gap-3"
+              className="rounded-lg overflow-hidden flex flex-col"
               style={{ background: "var(--surface-1)", border: "1px solid var(--good)" }}
             >
-              <FindPhotoRow find={find} borderColor="var(--good)" />
-              <div className="flex gap-3 items-center">
+              <FindHeroPhoto find={find} />
+              <div className="p-3 flex gap-3">
+                <FindReferenceThumb find={find} borderColor="var(--good)" />
                 <div className="flex-1 min-w-0">
                   <a
                     href={find.itemWebUrl}
@@ -542,21 +541,21 @@ export default function CardWatchlist() {
                       ${find.reference.ungradedPriceDollars.toFixed(2)} reference for &quot;{find.reference.productName}&quot;
                     </a>
                   )}
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
-                    ${find.priceDollars.toFixed(2)}
-                  </span>
-                  <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                    {find.percentBelowReference.toFixed(0)}% under reference
-                  </span>
-                  <button
-                    onClick={() => removeFromList(find.itemId, "confirmed")}
-                    className="text-xs"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    Remove
-                  </button>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
+                    <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
+                      ${find.priceDollars.toFixed(2)}
+                    </span>
+                    <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
+                      {find.percentBelowReference.toFixed(0)}% under reference
+                    </span>
+                    <button
+                      onClick={() => removeFromList(find.itemId, "confirmed")}
+                      className="text-xs"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -582,11 +581,12 @@ export default function CardWatchlist() {
           {mismatches.map((find) => (
             <div
               key={find.itemId}
-              className="rounded-lg p-3 flex flex-col gap-3"
+              className="rounded-lg overflow-hidden flex flex-col"
               style={{ background: "var(--surface-1)", border: "1px solid var(--critical)" }}
             >
-              <FindPhotoRow find={find} borderColor="var(--critical)" />
-              <div className="flex gap-3 items-center">
+              <FindHeroPhoto find={find} />
+              <div className="p-3 flex gap-3">
+                <FindReferenceThumb find={find} borderColor="var(--critical)" />
                 <div className="flex-1 min-w-0">
                   <a
                     href={find.itemWebUrl}
@@ -612,18 +612,18 @@ export default function CardWatchlist() {
                       Wrongly matched: ${find.reference.ungradedPriceDollars.toFixed(2)} for &quot;{find.reference.productName}&quot;
                     </a>
                   )}
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
-                    ${find.priceDollars.toFixed(2)}
-                  </span>
-                  <button
-                    onClick={() => removeFromList(find.itemId, "mismatches")}
-                    className="text-xs"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    Clear
-                  </button>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
+                    <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
+                      ${find.priceDollars.toFixed(2)}
+                    </span>
+                    <button
+                      onClick={() => removeFromList(find.itemId, "mismatches")}
+                      className="text-xs"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

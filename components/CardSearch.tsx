@@ -163,34 +163,28 @@ export default function CardSearch() {
             {result.listings.map((listing) => (
               <div
                 key={listing.itemId}
-                className="rounded-lg p-3 flex flex-col gap-3"
+                className="rounded-lg overflow-hidden flex flex-col"
                 style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
               >
-                <div className="flex gap-3">
-                  <a href={listing.itemWebUrl} target="_blank" rel="noopener noreferrer" className="flex-1 flex flex-col items-center gap-1 min-w-0">
-                    {listing.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={listing.imageUrl}
-                        alt=""
-                        className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg object-contain"
-                        style={{ background: "#fff", border: "1px solid var(--border-hairline)" }}
-                      />
-                    ) : (
-                      <div
-                        className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg flex items-center justify-center text-xs"
-                        style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
-                      >
-                        No photo
-                      </div>
-                    )}
-                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>Listing</span>
-                  </a>
+                <a href={listing.itemWebUrl} target="_blank" rel="noopener noreferrer" className="block">
+                  {listing.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={listing.imageUrl} alt="" className="w-full aspect-square object-contain" style={{ background: "#fff" }} />
+                  ) : (
+                    <div
+                      className="w-full aspect-square flex items-center justify-center text-sm"
+                      style={{ background: "#fff", color: "var(--text-muted)" }}
+                    >
+                      No photo
+                    </div>
+                  )}
+                </a>
+                <div className="p-3 flex gap-3">
                   <a
                     href={listing.reference?.productUrl ?? listing.reference?.itemWebUrl ?? listing.reference?.ebaySearchUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 flex flex-col items-center gap-1 min-w-0"
+                    className="flex flex-col items-center gap-1 shrink-0"
                     style={{ visibility: listing.reference ? "visible" : "hidden" }}
                   >
                     {listing.reference?.imageUrl ? (
@@ -198,21 +192,19 @@ export default function CardSearch() {
                       <img
                         src={listing.reference.imageUrl}
                         alt=""
-                        className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg object-contain"
+                        className="w-20 h-20 rounded-md object-contain"
                         style={{ background: "#fff", border: "1px solid var(--series-1)" }}
                       />
                     ) : (
                       <div
-                        className="w-full aspect-square max-w-[45vw] sm:max-w-[180px] rounded-lg flex items-center justify-center text-xs text-center px-2"
+                        className="w-20 h-20 rounded-md flex items-center justify-center text-[10px] text-center px-1"
                         style={{ background: "#fff", border: "1px solid var(--border-hairline)", color: "var(--text-muted)" }}
                       >
-                        No photo available
+                        No photo
                       </div>
                     )}
-                    <span className="text-xs" style={{ color: "var(--series-1)" }}>Verify (PriceCharting)</span>
+                    <span className="text-[10px] leading-none" style={{ color: "var(--series-1)" }}>Verify</span>
                   </a>
-                </div>
-                <div className="flex gap-3 items-center">
                   <div className="flex-1 min-w-0">
                     <a
                       href={listing.itemWebUrl}
@@ -237,16 +229,16 @@ export default function CardSearch() {
                         vs ${listing.reference.ungradedPriceDollars.toFixed(2)} for &quot;{listing.reference.productName}&quot;
                       </a>
                     )}
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
-                      ${listing.priceDollars.toFixed(2)}
-                    </span>
-                    {listing.isUnderpriced && (
-                      <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                        {listing.percentBelowReference!.toFixed(0)}% under reference
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
+                        ${listing.priceDollars.toFixed(2)}
                       </span>
-                    )}
+                      {listing.isUnderpriced && (
+                        <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
+                          {listing.percentBelowReference!.toFixed(0)}% under reference
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
