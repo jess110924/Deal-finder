@@ -65,21 +65,28 @@ export const UNDERPRICED_THRESHOLD_PERCENT = 20;
  * this product — not every product has one (confirmed: newer/more-
  * searched cards tend to, older ones sometimes don't) — and
  * `ebaySearchUrl` is a secondary always-available fallback for those.
- * `query` should be the search text that found this reference (not
- * necessarily the product's own name) since that's what's passed to the
- * epid lookup.
+ *
+ * The epid photo search is always built from the *product's own name*
+ * (`reference.productName`/`consoleName`), never from the specific
+ * listing's raw title — reported directly and confirmed live to be a
+ * real bug, not theoretical: searching with a listing's own exact title
+ * makes the epid-filtered search find that exact same listing back as
+ * "the reference", which is not just unhelpful but actively wrong (it's
+ * comparing a listing's photo against itself, not an independent
+ * source). `excludeItemId` (pass the listing being evaluated, if any) is
+ * a second, independent safety net against the same failure mode.
  */
 export async function buildReferenceInfo(
-  query: string,
   reference: CardReference,
   category: CardCategory,
-  includeImage = true
+  includeImage = true,
+  excludeItemId?: string
 ): Promise<ReferenceInfo> {
   let imageUrl: string | null = null;
   let itemWebUrl: string | null = null;
   if (includeImage && reference.epid) {
     try {
-      const found = await findReferenceListing(query, reference.epid);
+      const found = await findReferenceListing(`${reference.productName} ${reference.consoleName}`, reference.epid, excludeItemId);
       imageUrl = found?.imageUrl ?? null;
       itemWebUrl = found?.itemWebUrl ?? null;
     } catch {
@@ -154,7 +161,7 @@ async function evaluateListing(
 
   const percentBelowReference = ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
   const isUnderpriced = percentBelowReference >= UNDERPRICED_THRESHOLD_PERCENT;
-  const referenceInfo = await buildReferenceInfo(listing.title, reference, category, includeAllImages || isUnderpriced);
+  const referenceInfo = await buildReferenceInfo(reference, category, includeAllImages || isUnderpriced, listing.itemId);
 
   return { ...listing, priceDollars, percentBelowReference, isUnderpriced, reference: referenceInfo };
 }
@@ -246,7 +253,7 @@ export async function searchUnderpricedCards(
   // This is the *overall query's* best match, shown at the top of the
   // page for context — not what any individual listing below is actually
   // compared against anymore (each has its own, in `listings[].reference`).
-  const referenceInfo = reference ? await buildReferenceInfo(query, reference, category, includeReferenceImage) : null;
+  const referenceInfo = reference ? await buildReferenceInfo(reference, category, includeReferenceImage) : null;
 
   return {
     query,

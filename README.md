@@ -108,6 +108,27 @@ photo, but the PriceCharting link (and, failing that, a plain eBay
 search) is always shown regardless, so there's always something to click
 through and double-check by hand.
 
+**A real bug this had, caught live:** the epid-filtered search's `q` text
+used to be the specific listing's own raw title (needed so `findCard`
+could match the right product — see the query-stripping fix above). But
+reusing that same exact title for the *photo* search too meant the
+epid-filtered search almost always found that exact same listing back as
+its own best match — nothing beats an exact title for matching itself.
+Reported directly ("the smaller sportscardpro photo... is the same as
+the big eBay photo") and confirmed live against a real 20-listing search:
+every single time a reference photo was found, it was 100% a duplicate of
+the listing's own photo/URL, not an independent one. Two fixes, in
+`findReferenceListing` (`lib/sources/ebay.ts`) and `buildReferenceInfo`
+(`lib/cardComparison.ts`): (1) the photo search now always queries by the
+*product's own name* (`reference.productName`/`consoleName`) instead of
+the listing's title — a generic, listing-independent query; (2) an
+explicit `excludeItemId` skips the listing being evaluated from the
+results as a second, independent safety net. Re-checked live after the
+fix: 0 of 8 successful photo matches were self-matches (down from 6 of 6
+before), with no drop in how often a photo was found at all — the
+remaining "no photo" cases are products with no other live eBay listing
+under that epid to find, a real data limitation rather than a bug.
+
 Every saved find — from the watchlist or from Discover (below) — carries
 this same reference info (`reference` on `SavedFind` in `lib/db.ts`), not
 just the manual search page. Discover in particular needs it: it matches

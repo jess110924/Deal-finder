@@ -193,13 +193,30 @@ export type ReferenceListing = { imageUrl: string; itemWebUrl: string };
  * a normal Browse API search by epid works with the same basic scope
  * already used elsewhere and returns the exact matching product — verified
  * live against the Luka Doncic Prizm card, whose epid it returned exactly.
+ *
+ * `excludeItemId` skips a specific item from the results — critical when
+ * the caller is trying to find a photo of a *different* listing to
+ * compare against. Reported directly and confirmed live to be a real,
+ * common bug, not theoretical: when the caller is checking one specific
+ * eBay listing, passing that listing's own exact title as `query` here
+ * makes the epid-filtered search find that exact same listing as its own
+ * top (and often only) match — nothing beats an exact title for matching
+ * itself. Checked live against a real 20-listing search: every single
+ * time a "reference photo" was found, it was 100% the listing's own
+ * photo/URL, not an independent one. Requesting a few extra results and
+ * skipping the excluded id gives a real chance at a genuinely different
+ * listing under the same epid instead.
  */
-export async function findReferenceListing(query: string, epid: string): Promise<ReferenceListing | null> {
+export async function findReferenceListing(
+  query: string,
+  epid: string,
+  excludeItemId?: string
+): Promise<ReferenceListing | null> {
   const token = await getAccessToken();
 
   const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
   url.searchParams.set("q", query);
-  url.searchParams.set("limit", "1");
+  url.searchParams.set("limit", excludeItemId ? "10" : "1");
   url.searchParams.set("filter", `epid:{${epid}}`);
 
   const res = await fetch(url.toString(), {
@@ -211,7 +228,8 @@ export async function findReferenceListing(query: string, epid: string): Promise
   }
 
   const json = await res.json();
-  const item = (json?.itemSummaries ?? [])[0] as Record<string, unknown> | undefined;
+  const items = (json?.itemSummaries ?? []) as Record<string, unknown>[];
+  const item = items.find((i) => !excludeItemId || String(i.itemId) !== excludeItemId);
   if (!item) return null;
   const image = item.image as { imageUrl?: string } | undefined;
   if (!image?.imageUrl || !item.itemWebUrl) return null;

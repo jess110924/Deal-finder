@@ -66,7 +66,7 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
       ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
     if (percentBelowReference < DISCOVERY_THRESHOLD_PERCENT) return null;
 
-    const referenceInfo = await buildReferenceInfo(listing.title, reference, category);
+    const referenceInfo = await buildReferenceInfo(reference, category, true, listing.itemId);
     return {
       itemId: listing.itemId,
       title: listing.title,
