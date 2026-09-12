@@ -123,6 +123,30 @@ export async function saveNewFinds(candidates: SavedFind[]): Promise<number> {
   return trulyNew.length;
 }
 
+/**
+ * Recomputes and overwrites just one find's stored `reference` (and the
+ * `percentBelowReference` derived from it) in place. Requested directly:
+ * a saved find is a snapshot from whenever it was found, so a later fix
+ * to the matching/photo logic doesn't retroactively apply to anything
+ * already sitting in the review queue — a find saved with a since-fixed
+ * bug (e.g. a self-matched reference photo) stays wrong until either
+ * dismissed (losing it — not desirable for a real deal) or refreshed.
+ */
+export async function updateFindReference(
+  itemId: string,
+  reference: ReferenceInfo,
+  percentBelowReference: number
+): Promise<SavedFind | null> {
+  const existing = await getFinds();
+  const idx = existing.findIndex((f) => f.itemId === itemId);
+  if (idx === -1) return null;
+  const updated: SavedFind = { ...existing[idx], reference, percentBelowReference };
+  const next = [...existing];
+  next[idx] = updated;
+  await getRedis().set(FINDS_KEY, next);
+  return updated;
+}
+
 /** Removes a find from the saved list AND remembers it as dismissed, so a
  * future check doesn't just re-add the same listing right back. */
 export async function dismissFind(itemId: string): Promise<void> {

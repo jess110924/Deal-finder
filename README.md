@@ -211,6 +211,33 @@ after you've already triaged it. Both new sections have their own
 with it (bought it, or the mismatch got fixed) — this doesn't undo the
 dismissal, so it won't reappear in the review queue either way.
 
+#### "↻ Refresh reference" — a saved find is a snapshot, not a live view
+
+Reported directly: after the self-matched-photo bug above got fixed, an
+already-saved find kept showing the exact same broken photo anyway. Not
+a regression — a saved find's `reference` is computed once, at the
+moment it's found, and stored as-is; it was never recomputed against
+later matching-logic fixes. Confirmed live: re-running the match for the
+*exact same reported card* (`findCard` + `buildReferenceInfo`) with the
+already-shipped fix produced a correct, independent photo immediately —
+the fix worked, but the specific find on screen predated it.
+
+Dismissing isn't a good answer here: `dismissFind` (and `confirmFind`/
+`flagMismatch`) permanently blocklist that listing's item id
+(`card-dismissed-ids`) so a real, still-available deal would never be
+suggested again just because its cached reference happened to be stale.
+Added a third option instead — "↻ Refresh reference" on each find in the
+review queue re-runs `findCard`/`buildReferenceInfo` for that one
+listing's title right now and overwrites just its stored `reference`/
+`percentBelowReference` in place (`updateFindReference` in `lib/db.ts`,
+`action: "refresh"` on `POST /api/cards/finds`) — the find stays exactly
+where it is, just with current data. This is the general answer to a
+problem that's already happened three times in one session (query
+stripping, result ranking, self-matched photos): every future matching
+fix will only apply to new finds unless an existing one is explicitly
+refreshed, so this is the tool for "this looks wrong, is it actually
+still wrong under today's logic?" without losing the find either way.
+
 This needed two things the rest of the project doesn't use: an actual
 database, and a way to run checks on a schedule with nobody's browser
 open.

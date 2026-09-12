@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getFinds, dismissFind, confirmFind, flagMismatch } from "@/lib/db";
+import { getFinds, dismissFind, confirmFind, flagMismatch, updateFindReference } from "@/lib/db";
+import { findCard } from "@/lib/sources/pricecharting";
+import { buildReferenceInfo } from "@/lib/cardComparison";
 
 export async function GET() {
   try {
@@ -11,16 +13,38 @@ export async function GET() {
 
 // Moves a find into "My Picks" (confirmed exact match + real deal) or
 // "Mismatches" (flagged as wrong, kept for debugging) instead of just
-// dismissing it outright.
+// dismissing it outright. "refresh" recomputes a find's stored reference
+// under the current matching logic — reported directly: a find saved
+// before a matching/photo fix shipped keeps showing the old, wrong
+// reference forever, since it's a snapshot from whenever it was found,
+// not something dismissing-and-losing is a good answer to for a real deal.
 export async function POST(request: NextRequest) {
   try {
     const { itemId, action } = await request.json();
     if (!itemId || typeof itemId !== "string") {
       return NextResponse.json({ error: "Missing 'itemId'." }, { status: 400 });
     }
-    if (action !== "confirm" && action !== "flag") {
-      return NextResponse.json({ error: "'action' must be 'confirm' or 'flag'." }, { status: 400 });
+    if (action !== "confirm" && action !== "flag" && action !== "refresh") {
+      return NextResponse.json({ error: "'action' must be 'confirm', 'flag', or 'refresh'." }, { status: 400 });
     }
+
+    if (action === "refresh") {
+      const finds = await getFinds();
+      const find = finds.find((f) => f.itemId === itemId);
+      if (!find) {
+        return NextResponse.json({ error: "That find isn't in the review queue (already handled?)." }, { status: 404 });
+      }
+      const reference = await findCard(find.title, find.category);
+      if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) {
+        return NextResponse.json({ error: "No PriceCharting reference found for this listing right now." }, { status: 502 });
+      }
+      const referenceInfo = await buildReferenceInfo(reference, find.category, true, find.itemId);
+      const percentBelowReference =
+        ((reference.ungradedPriceCents - find.priceDollars * 100) / reference.ungradedPriceCents) * 100;
+      const updated = await updateFindReference(itemId, referenceInfo, percentBelowReference);
+      return NextResponse.json({ ok: true, find: updated });
+    }
+
     const find = action === "confirm" ? await confirmFind(itemId) : await flagMismatch(itemId);
     if (!find) {
       return NextResponse.json({ error: "That find isn't in the review queue (already handled?)." }, { status: 404 });

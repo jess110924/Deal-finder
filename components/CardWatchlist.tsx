@@ -73,6 +73,7 @@ export default function CardWatchlist() {
   const [bulkText, setBulkText] = useState("");
   const [bulkAdding, setBulkAdding] = useState(false);
   const [bulkAddedCount, setBulkAddedCount] = useState<number | null>(null);
+  const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
 
   async function loadAll() {
     setLoading(true);
@@ -182,6 +183,35 @@ export default function CardWatchlist() {
       setWatchlist(json.watchlist ?? []);
     } catch (err) {
       setError((err as Error).message);
+    }
+  }
+
+  // Recomputes a find's stored reference (photo, price, verify link)
+  // under the current matching logic. Needed because a saved find is a
+  // snapshot from whenever it was found — a later fix to the matching or
+  // photo logic doesn't retroactively apply to anything already sitting
+  // in the review queue. Requested directly after a matching fix shipped
+  // and an already-saved find kept showing the old, wrong reference photo.
+  async function refreshFind(itemId: string) {
+    setRefreshingIds((prev) => new Set(prev).add(itemId));
+    setError(null);
+    try {
+      const res = await fetch("/api/cards/finds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId, action: "refresh" }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
+      setFinds((prev) => prev.map((f) => (f.itemId === itemId ? json.find : f)));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRefreshingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(itemId);
+        return next;
+      });
     }
   }
 
@@ -485,6 +515,15 @@ export default function CardWatchlist() {
                     </button>
                     <button onClick={() => dismissFind(find.itemId)} className="text-xs" style={{ color: "var(--text-muted)" }}>
                       Dismiss
+                    </button>
+                    <button
+                      onClick={() => refreshFind(find.itemId)}
+                      disabled={refreshingIds.has(find.itemId)}
+                      className="text-xs"
+                      style={{ color: "var(--text-muted)" }}
+                      title="Looks wrong? Re-check this find's reference photo/price under the latest matching logic."
+                    >
+                      {refreshingIds.has(find.itemId) ? "Refreshing…" : "↻ Refresh reference"}
                     </button>
                   </div>
                 </div>
