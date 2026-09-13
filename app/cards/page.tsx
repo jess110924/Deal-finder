@@ -1,5 +1,6 @@
 import CardSearch from "@/components/CardSearch";
 import PlayerSearch from "@/components/PlayerSearch";
+import AuctionSnipe from "@/components/AuctionSnipe";
 import CardWatchlist from "@/components/CardWatchlist";
 
 export default function CardsPage() {
@@ -8,6 +9,8 @@ export default function CardsPage() {
       <CardSearch />
       <hr style={{ borderColor: "var(--border-hairline)" }} />
       <PlayerSearch />
+      <hr style={{ borderColor: "var(--border-hairline)" }} />
+      <AuctionSnipe />
       <hr style={{ borderColor: "var(--border-hairline)" }} />
       <CardWatchlist />
     </div>

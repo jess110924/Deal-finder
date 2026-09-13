@@ -449,6 +449,45 @@ this a smaller number than another number." `isUnderpriced`/
 context (some cards are worth watching even at a smaller absolute
 profit), just no longer the thing that decides what surfaces.
 
+### Auction Sniper — live auctions, soonest-ending first
+
+Requested directly: "any way I could find eBay auction listings that are
+ending and see if I can snipe them for a deal?" A completely different
+eBay search mode from everything else on this page — auctions, not Buy
+It Now — with its own section (`components/AuctionSnipe.tsx`,
+`lib/auctionSnipe.ts`, `app/api/cards/auctions/route.ts`).
+
+eBay's Browse API supports this directly, confirmed live rather than
+assumed (undocumented in anything checked ahead of time): the same
+`item_summary/search` endpoint accepts `buyingOptions:{AUCTION}` as a
+filter and `endingSoonest` as a sort value, and returns `currentBidPrice`,
+`bidCount`, and `itemEndDate` on each result instead of the fixed `price`
+a Buy It Now listing has — `searchAuctionListings` in `lib/sources/ebay.ts`
+wraps this, deliberately with `cache: "no-store"` (not the 5-minute cache
+`searchListings` uses) since a stale current bid or end time defeats the
+entire point.
+
+Each auction gets the same per-listing sold-comps check and profit
+estimate as manual search (same `getSoldComps`/`estimateResaleProfitDollars`
+machinery, same `MIN_WORTHWHILE_PROFIT_DOLLARS`/12-listing cost cap,
+capped to the *soonest-ending* 12 rather than cheapest-12 — those are the
+actual candidates worth spending a lookup on), with one deliberate
+difference in framing: the profit shown is explicitly labeled "if won at
+this bid," never presented as a guaranteed number the way a Buy It Now
+listing's profit is. A live auction's current bid is not its final
+price — an auction with real time left, or bids already on it, can and
+does climb well past where it sits now. The `maxHours` filter ("ending
+within 1 hour / 6 hours / 24 hours / 3 days / any time") exists because
+sniping is inherently about a specific window to act in, not a general
+browse — an auction three days out with $0 profit potential *right now*
+tells you nothing about what it'll actually close at.
+
+Confirmed live: found a real example while testing — a "2024-25 Panini
+Mosaic Ja Morant #195" auction sitting at a **$1.00** bid with **0 bids**
+and **2h 39m** left, whose sold comps averaged **$12.41** across 19
+sales — an estimated **$8.37** profit if won at that bid, exactly the
+"nobody's found this yet" case this feature is built to surface.
+
 ### The keyword-extraction fix — why raw eBay titles make bad search queries
 
 Reported directly, and confirmed live to be a serious problem, not a
@@ -858,4 +897,7 @@ site is wide open without it.
 - `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the Discover run (schedule currently disabled)
 - `components/PlayerSearch.tsx`, `lib/playerSearch.ts` — price-banded player browse + peer-listing check
 - `app/api/cards/player-search/route.ts`, `app/api/cards/peer-check/route.ts` — their endpoints
+- `components/AuctionSnipe.tsx`, `lib/auctionSnipe.ts` — live auctions ending soonest, checked against sold comps
+- `app/api/cards/auctions/route.ts` — its endpoint
+- `lib/resaleProfit.ts` — estimated resale profit after eBay's real selling fee and shipping cost
 - `lib/cardKeywords.ts` — rewrites a raw eBay title into a short, targeted search query (used for eBay's own keyword search only)

@@ -89,6 +89,85 @@ function mapItemSummary(item: Record<string, unknown>): EbayListing {
   };
 }
 
+export type EbayAuctionListing = {
+  itemId: string;
+  title: string;
+  // The current high bid — NOT a final price. An auction can (and often
+  // does) end well above this, especially with time left or multiple
+  // bidders already active; `bidCount` is the signal for how much that
+  // risk actually applies to a given listing.
+  currentBidCents: number;
+  bidCount: number;
+  // ISO datetime the auction closes — eBay's own `itemEndDate`.
+  endsAt: string;
+  shippingCents: number;
+  currency: string;
+  itemWebUrl: string;
+  imageUrl: string | null;
+  condition: string | null;
+};
+
+function mapAuctionItemSummary(item: Record<string, unknown>): EbayAuctionListing {
+  const bid = item.currentBidPrice as { value?: string; currency?: string } | undefined;
+  const image = item.image as { imageUrl?: string } | undefined;
+  const shippingOptions = item.shippingOptions as { shippingCost?: { value?: string } }[] | undefined;
+  const shippingCost = shippingOptions?.[0]?.shippingCost?.value;
+  return {
+    itemId: String(item.itemId ?? ""),
+    title: String(item.title ?? ""),
+    currentBidCents: bid?.value ? Math.round(Number(bid.value) * 100) : 0,
+    bidCount: Number(item.bidCount ?? 0),
+    endsAt: String(item.itemEndDate ?? ""),
+    shippingCents: shippingCost ? Math.round(Number(shippingCost) * 100) : 0,
+    currency: bid?.currency ?? "USD",
+    itemWebUrl: String(item.itemWebUrl ?? ""),
+    imageUrl: image?.imageUrl ?? null,
+    condition: (item.condition as string) ?? null,
+  };
+}
+
+/**
+ * Live auctions, soonest-ending first — the "snipe" workflow: an auction
+ * closing soon with few/no bids yet is more likely to close near its
+ * current bid than one with days left and active bidding driving it up
+ * toward real value already. Confirmed live: eBay's Browse API accepts
+ * `buyingOptions:{AUCTION}` as a filter value and `endingSoonest` as a
+ * sort value (undocumented in any source checked ahead of time, tested
+ * directly instead of assumed) and returns `currentBidPrice`, `bidCount`,
+ * and `itemEndDate` on each result — the fields fixed-price listings
+ * don't have, since there's no bidding and no end time on those.
+ *
+ * `cache: "no-store"` (not the 5-minute cache `searchListings` uses) —
+ * a current bid and time remaining are exactly the two things that must
+ * be fresh for this to be useful for actually sniping something.
+ */
+export async function searchAuctionListings(
+  query: string,
+  category: CardCategory,
+  limit = 30
+): Promise<EbayAuctionListing[]> {
+  const token = await getAccessToken();
+
+  const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("category_ids", CATEGORY_ID_BY_CARD_CATEGORY[category]);
+  url.searchParams.set("filter", "buyingOptions:{AUCTION}");
+  url.searchParams.set("sort", "endingSoonest");
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`eBay auction search failed: ${res.status} ${res.statusText}`);
+  }
+
+  const json = await res.json();
+  const items: Record<string, unknown>[] = json?.itemSummaries ?? [];
+  return items.map(mapAuctionItemSummary);
+}
+
 export type SearchListingsOptions = {
   limit?: number;
   minPriceDollars?: number;
