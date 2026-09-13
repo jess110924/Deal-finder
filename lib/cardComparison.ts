@@ -3,6 +3,7 @@ import { saveNewFinds, type SavedFind } from "@/lib/db";
 import { extractSearchKeywords, extractSerialDenominator, isBundle } from "@/lib/cardKeywords";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { getSoldComps, type SoldCompsSummary } from "@/lib/soldComps";
+import { estimateResaleProfitDollars } from "@/lib/resaleProfit";
 
 export type { CardCategory };
 export { isBundle };
@@ -39,6 +40,18 @@ export type CardListingResult = EbayListing & {
   // Real recent eBay sold prices for this exact listing's title — the
   // only comparison basis now. See getSoldComps in lib/soldComps.ts.
   soldComps: SoldCompsSummary | null;
+  // Estimated dollar profit from buying this listing and reselling at
+  // the average sold price, after eBay's actual selling fee and this
+  // listing's own shipping cost — see lib/resaleProfit.ts. The number
+  // that actually answers "is this worth buying," which a raw percent-
+  // below-average doesn't: a cheap card 25% under average can still be a
+  // net loss once eBay's ~13.25%+$0.30-0.40 cut is taken out.
+  estimatedProfitDollars: number | null;
+  // Profit clearing a minimum bar (not just > $0), since a real flip
+  // costs real time/effort (listing it, packaging, shipping, the risk of
+  // it not selling at the assumed price) that a $1 "profit" doesn't
+  // justify. See MIN_WORTHWHILE_PROFIT_DOLLARS.
+  isProfitable: boolean;
 };
 
 export type CardSearchResult = {
@@ -53,6 +66,13 @@ export type CardSearchResult = {
 };
 
 export const UNDERPRICED_THRESHOLD_PERCENT = 20;
+
+// A real flip costs real effort (listing it, packaging, shipping,
+// waiting for it to actually sell at the assumed average price rather
+// than sitting unsold) — a $1-2 "profit" after fees isn't worth that.
+// $5 is a starting point, not derived from anything more rigorous than
+// "clearly worth doing."
+export const MIN_WORTHWHILE_PROFIT_DOLLARS = 5;
 
 // Cheapest 12 listings per manual search get their own sold-comps
 // lookup — chosen as a middle ground (roughly half of a typical ~20-30
@@ -81,13 +101,27 @@ async function evaluateListing(listing: EbayListing, category: CardCategory): Pr
   const soldComps = await getSoldComps(listing.title, priceDollars).catch(() => null);
 
   if (!soldComps || soldComps.averageSoldPriceDollars <= 0) {
-    return { ...listing, priceDollars, percentBelowReference: null, isUnderpriced: false, soldComps: null };
+    return {
+      ...listing,
+      priceDollars,
+      percentBelowReference: null,
+      isUnderpriced: false,
+      soldComps: null,
+      estimatedProfitDollars: null,
+      isProfitable: false,
+    };
   }
 
   const percentBelowReference = soldComps.percentBelowAverage ?? 0;
   const isUnderpriced = percentBelowReference >= UNDERPRICED_THRESHOLD_PERCENT;
+  const estimatedProfitDollars = estimateResaleProfitDollars(
+    priceDollars,
+    listing.shippingCents / 100,
+    soldComps.averageSoldPriceDollars
+  );
+  const isProfitable = estimatedProfitDollars >= MIN_WORTHWHILE_PROFIT_DOLLARS;
 
-  return { ...listing, priceDollars, percentBelowReference, isUnderpriced, soldComps };
+  return { ...listing, priceDollars, percentBelowReference, isUnderpriced, soldComps, estimatedProfitDollars, isProfitable };
 }
 
 /**
@@ -181,14 +215,21 @@ export async function searchUnderpricedCards(
     percentBelowReference: null,
     isUnderpriced: false,
     soldComps: null,
+    estimatedProfitDollars: null,
+    isProfitable: false,
   }));
   const listings = [...evaluated, ...skipped];
 
-  // Best deals (most below average sold price) first, then everything else by price.
+  // Most profitable first (the actual point of this app), then whatever
+  // wasn't evaluated (capped out, or no comps found) by price ascending —
+  // the cheapest unevaluated listings are the ones worth a manual look
+  // first if nothing else has real numbers behind it.
   listings.sort((a, b) => {
-    if (a.percentBelowReference != null && b.percentBelowReference != null) {
-      return b.percentBelowReference - a.percentBelowReference;
+    if (a.estimatedProfitDollars != null && b.estimatedProfitDollars != null) {
+      return b.estimatedProfitDollars - a.estimatedProfitDollars;
     }
+    if (a.estimatedProfitDollars != null) return -1;
+    if (b.estimatedProfitDollars != null) return 1;
     return a.priceDollars - b.priceDollars;
   });
 
@@ -207,6 +248,14 @@ const WATCHLIST_MAX_LISTINGS_PER_CHECK = 5;
  * the latter, adding a card gives zero feedback until the next scheduled
  * run, up to 30 minutes of "did this even work?" with nothing to look at.
  *
+ * Filters by `isProfitable`, not `isUnderpriced` — requested directly:
+ * the whole point of this app is finding cards worth buying to resell,
+ * and a listing can be "underpriced" (below average sold price) while
+ * still being a net loss after eBay's real selling fee, especially on
+ * cheap cards where the flat $0.30-0.40 per-order fee is a large share
+ * of the sale. `isProfitable` is the number that actually answers "is
+ * this worth buying" — see lib/resaleProfit.ts.
+ *
  * Each saved find carries `l.soldComps` — that listing's own comps from
  * evaluateListing — not the watchlist entry's overall query comps. This
  * matters most exactly when the watchlist entry is broad (just a player
@@ -218,15 +267,17 @@ const WATCHLIST_MAX_LISTINGS_PER_CHECK = 5;
 export async function checkCardAndSaveFinds(card: string, category: CardCategory): Promise<number> {
   const result = await searchUnderpricedCards(card, category, WATCHLIST_MAX_LISTINGS_PER_CHECK, false);
   const candidates: SavedFind[] = result.listings
-    .filter((l) => l.isUnderpriced)
+    .filter((l) => l.isProfitable)
     .map((l) => ({
       itemId: l.itemId,
       title: l.title,
       priceDollars: l.priceDollars,
+      shippingDollars: l.shippingCents / 100,
       itemWebUrl: l.itemWebUrl,
       imageUrl: l.imageUrl,
       condition: l.condition,
       percentBelowReference: l.percentBelowReference!,
+      estimatedProfitDollars: l.estimatedProfitDollars ?? undefined,
       searchedFor: card,
       category,
       source: "watchlist",

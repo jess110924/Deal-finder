@@ -70,6 +70,11 @@ export type SavedFind = {
   itemWebUrl: string;
   imageUrl: string | null;
   condition: string | null;
+  // What this specific listing charges for shipping — part of the real
+  // cost to acquire it, needed to recompute `estimatedProfitDollars`
+  // accurately on refresh. Absent on finds saved before this field
+  // existed; treat missing as unknown/0, same default used elsewhere.
+  shippingDollars?: number;
   // Kept this name (not renamed to something like percentBelowAverageSold)
   // deliberately: ~200 finds already exist in production Redis under this
   // key, with no migration path for old records. What it's computed from
@@ -90,6 +95,10 @@ export type SavedFind = {
   // price was actually compared against. Absent on finds saved before
   // this field existed, or when no sold comps were found for this title.
   soldComps?: SoldCompsSummary;
+  // Estimated dollar profit after eBay's selling fee and this listing's
+  // shipping cost — see lib/resaleProfit.ts. Absent on finds saved
+  // before this field existed.
+  estimatedProfitDollars?: number;
   // Older finds saved before PriceCharting was removed carry a `reference`
   // field too — not declared here since nothing reads it anymore, but it's
   // harmless leftover data on those old Redis records, not something that
@@ -133,12 +142,13 @@ export async function saveNewFinds(candidates: SavedFind[]): Promise<number> {
 export async function updateFindSoldComps(
   itemId: string,
   soldComps: SoldCompsSummary,
-  percentBelowReference: number
+  percentBelowReference: number,
+  estimatedProfitDollars?: number
 ): Promise<SavedFind | null> {
   const existing = await getFinds();
   const idx = existing.findIndex((f) => f.itemId === itemId);
   if (idx === -1) return null;
-  const updated: SavedFind = { ...existing[idx], soldComps, percentBelowReference };
+  const updated: SavedFind = { ...existing[idx], soldComps, percentBelowReference, estimatedProfitDollars };
   const next = [...existing];
   next[idx] = updated;
   await getRedis().set(FINDS_KEY, next);

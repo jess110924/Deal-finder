@@ -1,6 +1,7 @@
 import { browseCategory, type CardCategory } from "@/lib/sources/ebay";
-import { isGraded, isBundle } from "@/lib/cardComparison";
+import { isGraded, isBundle, MIN_WORTHWHILE_PROFIT_DOLLARS } from "@/lib/cardComparison";
 import { getSoldComps } from "@/lib/soldComps";
+import { estimateResaleProfitDollars } from "@/lib/resaleProfit";
 import { saveNewFinds, type SavedFind } from "@/lib/db";
 import { mapWithConcurrency } from "@/lib/concurrency";
 
@@ -47,14 +48,26 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
     const percentBelowReference = soldComps.percentBelowAverage ?? 0;
     if (percentBelowReference < DISCOVERY_THRESHOLD_PERCENT) return null;
 
+    // Same profitability gate as the watchlist (see checkCardAndSaveFinds
+    // in lib/cardComparison.ts) — "underpriced" alone isn't "worth
+    // buying" once eBay's real selling fee is netted out.
+    const estimatedProfitDollars = estimateResaleProfitDollars(
+      priceDollars,
+      listing.shippingCents / 100,
+      soldComps.averageSoldPriceDollars
+    );
+    if (estimatedProfitDollars < MIN_WORTHWHILE_PROFIT_DOLLARS) return null;
+
     return {
       itemId: listing.itemId,
       title: listing.title,
       priceDollars,
+      shippingDollars: listing.shippingCents / 100,
       itemWebUrl: listing.itemWebUrl,
       imageUrl: listing.imageUrl,
       condition: listing.condition,
       percentBelowReference,
+      estimatedProfitDollars,
       searchedFor: listing.title,
       category,
       source: "discovery",

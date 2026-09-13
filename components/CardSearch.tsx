@@ -38,11 +38,13 @@ export default function CardSearch() {
           Trading Cards
         </h1>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Search a card. Listings come from eBay&apos;s active Buy It Now inventory; the comparison is
-          against real recent eBay sold prices for that exact title, not an estimate. Graded slabs
-          (PSA/BGS/SGC) are excluded — their prices aren&apos;t comparable to an ungraded average. To
-          keep sold-comps usage sustainable, only the 12 cheapest listings per search get checked —
-          the rest still show up below, just without a sold-comps line.
+          Search a card. Listings come from eBay&apos;s active Buy It Now inventory, compared against
+          real recent eBay sold prices for that exact title. Each listing shows an estimated resale
+          profit after eBay&apos;s actual ~13.25%+$0.30-0.40 selling fee and shipping cost — sorted
+          highest profit first, so the best flip is always at the top. Graded slabs (PSA/BGS/SGC) are
+          excluded — their prices aren&apos;t comparable to an ungraded average. To keep sold-comps
+          usage sustainable, only the 12 cheapest listings per search get checked — the rest still
+          show up below, just without a profit estimate.
         </p>
       </div>
 
@@ -191,16 +193,30 @@ export default function CardSearch() {
                       {listing.soldComps.compCount} sale{listing.soldComps.compCount === 1 ? "" : "s"}
                     </a>
                   )}
-                  <div className="flex items-center gap-2 mt-1.5">
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                       ${listing.priceDollars.toFixed(2)}
                     </span>
-                    {listing.isUnderpriced && (
-                      <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                        {listing.percentBelowReference!.toFixed(0)}% under average sold
+                    {listing.shippingCents > 0 && (
+                      <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                        + ${(listing.shippingCents / 100).toFixed(2)} ship
+                      </span>
+                    )}
+                    {listing.percentBelowReference != null && (
+                      <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                        {listing.percentBelowReference.toFixed(0)}% under avg sold
                       </span>
                     )}
                   </div>
+                  {listing.estimatedProfitDollars != null && (
+                    <div
+                      className="text-sm font-semibold mt-1"
+                      style={{ color: listing.isProfitable ? "var(--good)" : "var(--critical)" }}
+                    >
+                      {listing.estimatedProfitDollars >= 0 ? "Est. profit" : "Est. loss"}: $
+                      {Math.abs(listing.estimatedProfitDollars).toFixed(2)} after eBay fees
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

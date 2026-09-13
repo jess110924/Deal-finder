@@ -46,6 +46,22 @@ function SoldCompsLine({ find }: { find: SavedFind }) {
   );
 }
 
+// Estimated dollar profit after eBay's real selling fee and this
+// listing's shipping cost — see lib/resaleProfit.ts. This is now what
+// actually gates whether a find lands here at all (checkCardAndSaveFinds
+// filters by isProfitable, not just isUnderpriced), so showing the
+// number itself, not just the raw percent-below-average, is the honest
+// version of "why this was saved."
+function EstimatedProfitLine({ find }: { find: SavedFind }) {
+  if (find.estimatedProfitDollars == null) return null;
+  const isProfit = find.estimatedProfitDollars >= 0;
+  return (
+    <div className="text-sm font-semibold mt-1" style={{ color: isProfit ? "var(--good)" : "var(--critical)" }}>
+      {isProfit ? "Est. profit" : "Est. loss"}: ${Math.abs(find.estimatedProfitDollars).toFixed(2)} after eBay fees
+    </div>
+  );
+}
+
 export default function CardWatchlist() {
   const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
   const [finds, setFinds] = useState<SavedFind[]>([]);
@@ -463,6 +479,7 @@ export default function CardWatchlist() {
                     {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                   </div>
                   <SoldCompsLine find={find} />
+                  <EstimatedProfitLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                       ${find.priceDollars.toFixed(2)}
@@ -540,6 +557,7 @@ export default function CardWatchlist() {
                     {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                   </div>
                   <SoldCompsLine find={find} />
+                  <EstimatedProfitLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                       ${find.priceDollars.toFixed(2)}
@@ -600,6 +618,7 @@ export default function CardWatchlist() {
                     {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                   </div>
                   <SoldCompsLine find={find} />
+                  <EstimatedProfitLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                       ${find.priceDollars.toFixed(2)}

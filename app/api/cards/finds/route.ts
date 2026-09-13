@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getFinds, dismissFind, confirmFind, flagMismatch, updateFindSoldComps } from "@/lib/db";
 import { getSoldComps } from "@/lib/soldComps";
+import { estimateResaleProfitDollars } from "@/lib/resaleProfit";
 
 export async function GET() {
   try {
@@ -38,7 +39,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "No sold comps found for this listing right now." }, { status: 502 });
       }
       const percentBelowReference = soldComps.percentBelowAverage ?? 0;
-      const updated = await updateFindSoldComps(itemId, soldComps, percentBelowReference);
+      const estimatedProfitDollars = estimateResaleProfitDollars(
+        find.priceDollars,
+        find.shippingDollars ?? 0,
+        soldComps.averageSoldPriceDollars
+      );
+      const updated = await updateFindSoldComps(itemId, soldComps, percentBelowReference, estimatedProfitDollars);
       return NextResponse.json({ ok: true, find: updated });
     }
 

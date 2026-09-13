@@ -407,6 +407,48 @@ comps budget" near the top of this section for what that forced (Discover
 and the watchlist auto-check disabled, manual search capped to the
 cheapest 12 listings per search).
 
+#### Real profit, not just "underpriced" — `lib/resaleProfit.ts`
+
+Requested directly: "I want to be able to find cards on eBay that are
+undervalued so I can resell them for a profit... make my process more
+efficient." A raw "25% under average sold price" doesn't answer "is this
+actually worth buying" — eBay takes a real cut of the resale (confirmed
+live via web search against eBay's current published fee schedule, not
+assumed: **13.25%** of the sale total for Sports/Non-Sport Trading Cards
+and CCGs, up to $7,500, plus a flat **$0.30** (orders $10 or under) /
+**$0.40** (orders over $10) per order), and a cheap card's margin can get
+eaten entirely by that flat per-order fee alone.
+
+`estimateResaleProfitDollars` (`lib/resaleProfit.ts`) computes: cost to
+acquire (the listing's price **+ its own shipping cost**, pulled from
+eBay's `shippingOptions` — confirmed live against real search results,
+field is `item.shippingOptions[0].shippingCost.value`) vs. net proceeds
+from reselling at the average sold price (average sold price minus the
+estimated eBay fee on that amount). The result — `estimatedProfitDollars`
+on `CardListingResult`/`SavedFind` — is shown directly ("Est. profit:
+$12.40 after eBay fees" or "Est. loss: $1.10 after eBay fees", colored
+good/critical) and is now the **primary sort key** on the manual search
+page: most profitable first, not just "most % below average" — the
+actual point of the app, front and center instead of requiring mental
+math on every listing.
+
+Deliberately does *not* try to model the cost of shipping the card back
+out when it's resold — that's charged to (and paid by) whoever buys it
+from you, the same way it was charged to you buying this one, so it's
+treated as a wash rather than guessed at with no real data to base a
+number on either way.
+
+**`isProfitable`** replaced `isUnderpriced` as the actual gate for what
+gets saved to the watchlist/Discover review queue
+(`MIN_WORTHWHILE_PROFIT_DOLLARS = 5`, `checkCardAndSaveFinds` and
+`discoverDeals`) — a listing can be "underpriced" and still not be worth
+buying once the real fee is netted out, especially on cheap cards, and
+the review queue's whole purpose is "is this worth acting on," not "is
+this a smaller number than another number." `isUnderpriced`/
+`percentBelowReference` are both still computed and shown as secondary
+context (some cards are worth watching even at a smaller absolute
+profit), just no longer the thing that decides what surfaces.
+
 ### The keyword-extraction fix — why raw eBay titles make bad search queries
 
 Reported directly, and confirmed live to be a serious problem, not a

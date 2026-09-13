@@ -49,6 +49,12 @@ export type EbayListing = {
   itemId: string;
   title: string;
   priceCents: number;
+  // Cost to have this specific listing shipped to the buyer — part of
+  // the real cost to acquire it, not just the item price. Defaults to 0
+  // when eBay doesn't report a shipping cost (free shipping, or a
+  // shipping option eBay's search response didn't include) — an honest
+  // "unknown/free" default, not a guess at a nonzero cost.
+  shippingCents: number;
   currency: string;
   itemWebUrl: string;
   imageUrl: string | null;
@@ -69,10 +75,13 @@ const CATEGORY_ID_BY_CARD_CATEGORY: Record<CardCategory, string> = {
 function mapItemSummary(item: Record<string, unknown>): EbayListing {
   const price = item.price as { value?: string; currency?: string } | undefined;
   const image = item.image as { imageUrl?: string } | undefined;
+  const shippingOptions = item.shippingOptions as { shippingCost?: { value?: string } }[] | undefined;
+  const shippingCost = shippingOptions?.[0]?.shippingCost?.value;
   return {
     itemId: String(item.itemId ?? ""),
     title: String(item.title ?? ""),
     priceCents: price?.value ? Math.round(Number(price.value) * 100) : 0,
+    shippingCents: shippingCost ? Math.round(Number(shippingCost) * 100) : 0,
     currency: price?.currency ?? "USD",
     itemWebUrl: String(item.itemWebUrl ?? ""),
     imageUrl: image?.imageUrl ?? null,
