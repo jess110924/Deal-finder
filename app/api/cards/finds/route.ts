@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getFinds, dismissFind, confirmFind, flagMismatch, updateFindSoldComps } from "@/lib/db";
-import { getSoldComps } from "@/lib/soldComps";
+import { getFinds, dismissFind, confirmFind, flagMismatch, updateFindReference } from "@/lib/db";
+import { findCard } from "@/lib/sources/pricecharting";
+import { buildReferenceInfo } from "@/lib/cardComparison";
 import { estimateResaleProfitDollars } from "@/lib/resaleProfit";
 
 export async function GET() {
@@ -13,10 +14,10 @@ export async function GET() {
 
 // Moves a find into "My Picks" (confirmed exact match + real deal) or
 // "Mismatches" (flagged as wrong, kept for debugging) instead of just
-// dismissing it outright. "refresh" recomputes a find's stored sold
-// comps under the current matching logic — reported directly: a find
-// saved before a matching fix shipped keeps showing the old, wrong
-// comps forever, since it's a snapshot from whenever it was found, not
+// dismissing it outright. "refresh" recomputes a find's stored reference
+// under the current matching logic — reported directly: a find saved
+// before a matching fix shipped keeps showing the old, wrong reference
+// forever, since it's a snapshot from whenever it was found, not
 // something dismissing-and-losing is a good answer to for a real deal.
 export async function POST(request: NextRequest) {
   try {
@@ -34,17 +35,19 @@ export async function POST(request: NextRequest) {
       if (!find) {
         return NextResponse.json({ error: "That find isn't in the review queue (already handled?)." }, { status: 404 });
       }
-      const soldComps = await getSoldComps(find.title, find.priceDollars);
-      if (!soldComps || soldComps.averageSoldPriceDollars <= 0) {
-        return NextResponse.json({ error: "No sold comps found for this listing right now." }, { status: 502 });
+      const reference = await findCard(find.title, find.category);
+      if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) {
+        return NextResponse.json({ error: "No PriceCharting reference found for this listing right now." }, { status: 502 });
       }
-      const percentBelowReference = soldComps.percentBelowAverage ?? 0;
+      const referenceInfo = await buildReferenceInfo(reference, find.category, false);
+      const percentBelowReference =
+        ((reference.ungradedPriceCents - find.priceDollars * 100) / reference.ungradedPriceCents) * 100;
       const estimatedProfitDollars = estimateResaleProfitDollars(
         find.priceDollars,
         find.shippingDollars ?? 0,
-        soldComps.averageSoldPriceDollars
+        referenceInfo.ungradedPriceDollars
       );
-      const updated = await updateFindSoldComps(itemId, soldComps, percentBelowReference, estimatedProfitDollars);
+      const updated = await updateFindReference(itemId, referenceInfo, percentBelowReference, estimatedProfitDollars);
       return NextResponse.json({ ok: true, find: updated });
     }
 

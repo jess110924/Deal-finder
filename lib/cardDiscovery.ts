@@ -1,6 +1,6 @@
 import { browseCategory, type CardCategory } from "@/lib/sources/ebay";
-import { isGraded, isBundle, MIN_WORTHWHILE_PROFIT_DOLLARS } from "@/lib/cardComparison";
-import { getSoldComps } from "@/lib/soldComps";
+import { findCard } from "@/lib/sources/pricecharting";
+import { isGraded, isBundle, buildReferenceInfo, MIN_WORTHWHILE_PROFIT_DOLLARS } from "@/lib/cardComparison";
 import { estimateResaleProfitDollars } from "@/lib/resaleProfit";
 import { saveNewFinds, type SavedFind } from "@/lib/db";
 import { mapWithConcurrency } from "@/lib/concurrency";
@@ -17,11 +17,11 @@ const NON_CARD_PATTERN =
 
 // Slightly higher than the manual-search/watchlist threshold (20%,
 // UNDERPRICED_THRESHOLD_PERCENT in cardComparison.ts). Browsed titles get
-// matched to sold comps without a human choosing the search term, so a
-// bad match is more likely here than for a deliberately-typed watchlist
-// name — the higher bar is a small safety margin, not a fix for that
-// risk. The real safeguard is that every discovered find carries its
-// sold comps (with a link to eBay's own sold search) so it can be
+// matched to a PriceCharting product without a human choosing the search
+// term, so a bad match is more likely here than for a deliberately-typed
+// watchlist name — the higher bar is a small safety margin, not a fix for
+// that risk. The real safeguard is that every discovered find carries a
+// reference photo/link (via buildReferenceInfo) so it can be visually
 // checked before trusting it.
 const DISCOVERY_THRESHOLD_PERCENT = 25;
 
@@ -29,10 +29,11 @@ const LOOKUP_CONCURRENCY = 6;
 
 /**
  * Browses a category's live eBay listings (no name needed) and checks
- * each one against its own recent sold comps, saving anything that comes
- * out underpriced. This is the "find cards worth watching without naming
- * them first" path — the watchlist (checkCardAndSaveFinds in
- * cardComparison.ts) only ever checks cards it's explicitly told about.
+ * each one against its own PriceCharting match, saving anything that
+ * comes out underpriced *and* profitable. This is the "find cards worth
+ * watching without naming them first" path — the watchlist
+ * (checkCardAndSaveFinds in cardComparison.ts) only ever checks cards
+ * it's explicitly told about.
  */
 export async function discoverDeals(category: CardCategory, limit = 25): Promise<number> {
   const listings = await browseCategory(category, limit);
@@ -41,21 +42,32 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
   );
 
   const results = await mapWithConcurrency(toCheck, LOOKUP_CONCURRENCY, async (listing): Promise<SavedFind | null> => {
-    const priceDollars = listing.priceCents / 100;
-    const soldComps = await getSoldComps(listing.title, priceDollars).catch(() => null);
-    if (!soldComps || soldComps.averageSoldPriceDollars <= 0) return null;
+    // Looks up the raw listing title directly — findCard's relevance
+    // scoring (pricecharting.ts) picks the best-matching candidate out of
+    // everything the query returns, so it no longer needs a hand-trimmed
+    // query to avoid being fooled by position-0 results.
+    let reference;
+    try {
+      reference = await findCard(listing.title, category);
+    } catch {
+      return null; // one bad PriceCharting lookup shouldn't kill the whole run
+    }
+    if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) return null;
 
-    const percentBelowReference = soldComps.percentBelowAverage ?? 0;
+    const percentBelowReference =
+      ((reference.ungradedPriceCents - listing.priceCents) / reference.ungradedPriceCents) * 100;
     if (percentBelowReference < DISCOVERY_THRESHOLD_PERCENT) return null;
 
-    // Same profitability gate as the watchlist (see checkCardAndSaveFinds
-    // in lib/cardComparison.ts) — "underpriced" alone isn't "worth
-    // buying" once eBay's real selling fee is netted out.
+    const priceDollars = listing.priceCents / 100;
+    const referenceInfo = await buildReferenceInfo(reference, category, false);
     const estimatedProfitDollars = estimateResaleProfitDollars(
       priceDollars,
       listing.shippingCents / 100,
-      soldComps.averageSoldPriceDollars
+      referenceInfo.ungradedPriceDollars
     );
+    // Same profitability gate as the watchlist (see checkCardAndSaveFinds
+    // in lib/cardComparison.ts) — "underpriced" alone isn't "worth
+    // buying" once eBay's real selling fee is netted out.
     if (estimatedProfitDollars < MIN_WORTHWHILE_PROFIT_DOLLARS) return null;
 
     return {
@@ -68,10 +80,10 @@ export async function discoverDeals(category: CardCategory, limit = 25): Promise
       condition: listing.condition,
       percentBelowReference,
       estimatedProfitDollars,
-      searchedFor: listing.title,
+      searchedFor: referenceInfo.productName,
       category,
       source: "discovery",
-      soldComps,
+      reference: referenceInfo,
       foundAt: new Date().toISOString(),
     };
   });

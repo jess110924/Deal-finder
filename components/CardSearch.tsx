@@ -34,10 +34,11 @@ export default function CardSearch() {
   // Only listings that clear MIN_WORTHWHILE_PROFIT_DOLLARS get shown —
   // requested directly: "when I search a card it only shows profitable
   // cards? The loss listings are pointless." Filtering here (not on the
-  // server) still requires checking every capped listing's sold comps to
-  // know which ones qualify — that check is what determines profitability
-  // in the first place, so it can't be skipped to "save" a request; this
-  // only stops showing the ones that didn't clear the bar once checked.
+  // server) still requires checking every capped listing's own
+  // PriceCharting match to know which ones qualify — that check is what
+  // determines profitability in the first place, so it can't be skipped;
+  // this only stops showing the ones that didn't clear the bar once
+  // checked.
   const checked = result?.listings.filter((l) => l.wasChecked) ?? [];
   const profitable = result?.listings.filter((l) => l.isProfitable) ?? [];
 
@@ -48,14 +49,13 @@ export default function CardSearch() {
           Trading Cards
         </h1>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Search a card. Listings come from eBay&apos;s active Buy It Now inventory, compared against
-          real recent eBay sold prices for that exact title. Only listings with an estimated profit of
-          $5+ after eBay&apos;s actual ~13.25%+$0.30-0.40 selling fee and shipping cost are shown, sorted
-          highest profit first. Graded slabs (PSA/BGS/SGC) are excluded — their prices aren&apos;t
-          comparable to an ungraded average. To keep sold-comps usage sustainable, only the 12 cheapest
-          listings per search get checked — checking a listing is what tells us whether it&apos;s
-          profitable, so that part can&apos;t be skipped, but you&apos;re only shown the ones worth
-          acting on.
+          Search a card. Reference price comes from PriceCharting; listings come from eBay&apos;s active
+          Buy It Now inventory. Only listings with an estimated profit of $5+ after eBay&apos;s actual
+          ~13.25%+$0.30-0.40 selling fee and shipping cost are shown, sorted highest profit first. Graded
+          slabs (PSA/BGS/SGC) are excluded from the comparison — their prices aren&apos;t comparable to
+          an ungraded reference. Only the 12 cheapest listings per search get checked against
+          PriceCharting — checking a listing is what tells us whether it&apos;s profitable, so that part
+          can&apos;t be skipped, but you&apos;re only shown the ones worth acting on.
         </p>
       </div>
 
@@ -121,36 +121,48 @@ export default function CardSearch() {
             className="rounded-lg p-4"
             style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
           >
-            {result.soldComps ? (
-              <div>
-                <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                  Recent sold comps for this search (ungraded)
+            {result.reference ? (
+              <div className="flex gap-4 items-center">
+                {result.reference.imageUrl && (
+                  <a href={result.reference.itemWebUrl ?? result.reference.ebaySearchUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={result.reference.imageUrl}
+                      alt=""
+                      className="w-28 h-28 rounded-lg object-contain"
+                      style={{ background: "#fff", border: "1px solid var(--border-hairline)" }}
+                    />
+                  </a>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm" style={{ color: "var(--text-muted)" }}>
+                    Closest PriceCharting match for this search (ungraded)
+                  </div>
+                  <div className="font-medium text-lg" style={{ color: "var(--text-primary)" }}>{result.reference.productName}</div>
+                  <div className="text-2xl font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
+                    ${result.reference.ungradedPriceDollars.toFixed(2)}
+                  </div>
+                  <a
+                    href={result.reference.productUrl ?? result.reference.itemWebUrl ?? result.reference.ebaySearchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs"
+                    style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
+                  >
+                    {result.reference.productUrl ? "View this card on PriceCharting" : "Search eBay to double-check this is the right card"}
+                  </a>
                 </div>
-                <div className="text-2xl font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>
-                  ${result.soldComps.averageSoldPriceDollars.toFixed(2)} avg
-                </div>
-                <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                  {result.soldComps.compCount} sale{result.soldComps.compCount === 1 ? "" : "s"} · median $
-                  {result.soldComps.medianSoldPriceDollars.toFixed(2)}
-                </div>
-                <a
-                  href={result.soldComps.soldSearchUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs"
-                  style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
-                >
-                  View sold listings on eBay
-                </a>
               </div>
             ) : (
-              <p style={{ color: "var(--text-muted)" }}>No recent sold comps found for this search — showing eBay listings without a comparison.</p>
+              <p style={{ color: "var(--text-muted)" }}>No PriceCharting reference found for this search — showing eBay listings without a comparison.</p>
             )}
           </div>
 
           <p className="text-xs" style={{ color: "var(--text-muted)" }}>
             {result.listings.length} listing{result.listings.length === 1 ? "" : "s"} found · {checked.length} checked
-            against sold comps · {profitable.length} profitable
+            against PriceCharting · {profitable.length} profitable. A broad search (just a player name,
+            say) can return listings for many different cards, not copies of the one above — each
+            listing is checked against its own closest match, not necessarily the one above.
           </p>
 
           <div className="flex flex-col gap-2">
@@ -192,16 +204,15 @@ export default function CardSearch() {
                   {listing.condition && (
                     <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{listing.condition}</div>
                   )}
-                  {listing.soldComps && (
+                  {listing.reference && (
                     <a
-                      href={listing.soldComps.soldSearchUrl}
+                      href={listing.reference.productUrl ?? listing.reference.itemWebUrl ?? listing.reference.ebaySearchUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-sm block mt-1"
-                      style={{ color: "var(--series-1)", textDecoration: "underline" }}
+                      style={{ color: "var(--text-secondary)", textDecoration: "underline" }}
                     >
-                      Sold comps: avg ${listing.soldComps.averageSoldPriceDollars.toFixed(2)} across{" "}
-                      {listing.soldComps.compCount} sale{listing.soldComps.compCount === 1 ? "" : "s"}
+                      vs ${listing.reference.ungradedPriceDollars.toFixed(2)} for &quot;{listing.reference.productName}&quot;
                     </a>
                   )}
                   <div className="flex items-center gap-2 mt-1.5 flex-wrap">
@@ -215,7 +226,7 @@ export default function CardSearch() {
                     )}
                     {listing.percentBelowReference != null && (
                       <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                        {listing.percentBelowReference.toFixed(0)}% under avg sold
+                        {listing.percentBelowReference.toFixed(0)}% under reference
                       </span>
                     )}
                   </div>

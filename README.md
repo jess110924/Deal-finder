@@ -11,126 +11,116 @@ listings on eBay.
 
 Different shape from the main deal feed: instead of comparing a price
 against its own history (like Keepa does), this compares a **live eBay
-listing** against **real recent eBay sold prices** for that exact card.
-Search a card name; it looks up eBay's current Buy It Now listings for
-that search, checks each one's own recent sold comps, and flags any
-listing priced 20%+ below the average sold price.
-
-This used to compare against PriceCharting's estimated market value
-instead — removed entirely (see "PriceCharting was removed" below) in
-favor of comparing against what the card has actually sold for, which
-turned out to also be simpler: one fewer API, one fewer category-to-domain
-split to get wrong, and a number that's a real transaction instead of an
-estimate.
+listing** against an **independent reference price** (PriceCharting).
+Search a card name; it looks up PriceCharting's ungraded market value and
+eBay's current Buy It Now listings for that search, then flags any listing
+priced 20%+ below the reference **and** actually profitable to resell
+after eBay's real selling fee (see "Real profit" below) — not just
+cheaper-looking.
 
 Covers two categories, picked via a toggle on both the search box and the
-watchlist add form: **Sports** and **Pokémon** — each maps to a different
-eBay category id under the hood; everything else (the 20%-below-average
-threshold, graded/bundle filtering, the watchlist, saved finds) works
-identically for both.
+watchlist add form: **Sports** and **Pokémon**. Each uses a different
+PriceCharting domain and a different eBay category id under the hood (see
+the gotcha section below) — everything else (the threshold, graded/bundle
+filtering, the watchlist, saved finds) works identically for both.
 
 **Graded slabs (PSA/BGS/SGC/CGC) and multi-card lots are excluded from the
-comparison.** Graded cards sell for multiples of an ungraded price, so
-comparing them would produce false "amazing deal" signals rather than real
-ones; a lot of several cards for one price isn't comparable to a
-single-card price at all. For live eBay listings, grading is detected via
-eBay's own `condition` field (confirmed reliable: literally "Graded" vs
-"Ungraded"), not a title guess — an earlier title-regex version of this
-filter missed titles like "PSA Graded Mint 9" (words between "PSA" and the
-grade number) and let real graded slabs slip through undetected. Sold
-comps come from a different API with no such structured field, so those
-are filtered by a title-based grading-company check instead (see
-`isLikelyGraded` in `lib/sources/soldComps.ts`).
+comparison.** Graded cards sell for multiples of an ungraded reference
+price, so comparing them would produce false "amazing deal" signals rather
+than real ones; a lot of several cards for one price isn't comparable to a
+single-card reference at all. Grading is detected via eBay's own
+`condition` field (confirmed reliable: literally "Graded" vs "Ungraded"),
+not a title guess — an earlier title-regex version of this filter missed
+titles like "PSA Graded Mint 9" (words between "PSA" and the grade number)
+and let real graded slabs slip through undetected.
 
 ### Setup
 
 Needs these in `.env`:
 
 ```
+PRICECHARTING_API_KEY=your-existing-key
 EBAY_CLIENT_ID=...
 EBAY_CLIENT_SECRET=...
-SOLD_COMPS_API_KEY=...
 ```
 
 Get the eBay credentials free at [developer.ebay.com](https://developer.ebay.com) →
 Application Keys → use the **Production** App ID and Cert ID (not Sandbox).
-`SOLD_COMPS_API_KEY` is a paid third-party key (api.sold-comps.com) — see
-"Sold comps everywhere" below for what it's used for. Whichever
-environment runs the app needs its own copy of these (a local `.env` for
-`npm run dev`, Vercel's project environment variables for production).
+Whichever environment runs the app needs its own copy of these (a local
+`.env` for `npm run dev`, Vercel's project environment variables for
+production).
 
-### PriceCharting was removed
+### A brief detour through sold comps, and back
 
-This project originally compared listings against PriceCharting/
-SportsCardsPro's estimated market value, with a "Verify" link/photo
-pointing at the matched product's own page. Removed entirely, requested
-directly ("remove the sportscardpro stuff... I only want sold comps API
-and the options that display average sold price"), after a long chain of
-matching-accuracy fixes on that system (query-stripping bugs, position-0
-trust bugs, self-matched reference photos — see git history if the detail
-ever matters) — sold comps replaced it as the sole comparison basis and
-made a whole category of "is the reference actually right" bugs moot,
-since the comparison is now against real transactions instead of an
-estimate that could itself be mismatched. The genuinely reusable lesson
-that carried over: search with a listing's *full raw title*, not a
-keyword-stripped version — true for PriceCharting matching before, and
-confirmed true again for the sold-comps API (see "Sold comps everywhere"
-below).
+This project spent a while comparing listings against real recent eBay
+sold prices (`SOLD_COMPS_API_KEY`, a paid third-party scraper API)
+instead of PriceCharting's estimated value — removing PriceCharting
+entirely, then rebuilding a profit-in-dollars feature and an Auction
+Sniper on top of sold comps. Reverted back to PriceCharting, requested
+directly ("I do not want to use sold-comps"). `lib/sources/pricecharting.ts`,
+`lib/soldComps.ts`, and `lib/sources/soldComps.ts` were all deleted and
+recreated at various points in this project's history — see git history
+around commits mentioning "PriceCharting" or "sold comps" if the
+specifics of either era ever matter again.
 
-`lib/sources/pricecharting.ts` no longer exists. `CardCategory` (still
-needed — Sports vs. Pokémon still drives which eBay category id gets
-searched, `212` vs `183454`) moved to `lib/sources/ebay.ts`, the one
-place it's still functionally used.
+**Kept from the sold-comps era, now powered by PriceCharting's price
+instead:** the estimated-profit-in-dollars feature and the "only show
+profitable listings" filter (see "Real profit" below) — both were judged
+worth keeping regardless of which reference price feeds them. **Reverted
+to how they worked before sold comps:** the main search/watchlist/
+Discover reference price (back to PriceCharting), Player Search's "Check
+similar listings" (back to comparing other active asking prices — this
+one never used PriceCharting even before sold comps existed, so
+"reverting" it means asking-price comparison, not PriceCharting), and
+Auction Sniper (adapted to compare a live bid against PriceCharting's
+reference instead of sold comps, since it didn't exist before the
+sold-comps era and had no old version to revert to).
 
-### Sold-comps budget: why Discover and the watchlist auto-check are disabled
+**One thing worth knowing if the sold-comps subscription is still
+active:** nothing in this app calls that API anymore after this revert.
+If it was upgraded to a paid tier for this project specifically, that
+subscription can be downgraded or cancelled without breaking anything
+here.
 
-The sold-comps API (`SOLD_COMPS_API_KEY`) is a paid, metered third-party
-service (2,000 or 10,000 calls/month, depending on plan) — a different
-cost model from every other API this project uses, all free. Wiring sold
-comps into every listing of every automatic background job (see "Sold
-comps everywhere" below) without accounting for that turned out to be a
-real problem once actually measured: Discover alone projected to ~32,000
-calls/month, and the watchlist's 30-minute auto-check to ~34,500 calls/
-month for a *single* watched card — both individually blow past even the
-largest tier.
+### An important gotcha this was built around: pricecharting.com vs sportscardspro.com
 
-Decided directly, after seeing those numbers, to disable both entirely
-and put the whole budget toward manual search instead — that's the
-actual "search a card, find price differences" workflow this is for,
-and it's the one place cost is naturally bounded by how often a person
-searches, not by an unattended job running on a fixed schedule
-regardless of whether anyone's looking:
+The reference-price lookup (`lib/sources/pricecharting.ts`) queries
+**`sportscardspro.com`** for the Sports category, not `pricecharting.com`
+— same company, same account, same API key, same request/response format,
+but a domain scoped specifically to sports cards. This isn't a style
+choice: querying pricecharting.com's own domain for a sports card search
+returns almost entirely irrelevant results (Funko figures, unrelated
+products that happen to share a player's name — sometimes zero real
+matches in the first 100 results for a very well-known card).
+`pricecharting.com` itself is used for the **Pokémon** category instead —
+confirmed live (a "1999 Base Set Charizard" query returns a real, sane
+$489 ungraded reference), since sportscardspro.com is sports-only and
+wouldn't return good Pokémon matches.
 
-- **Discover** (`.github/workflows/discover-deals.yml`) — schedule
-  commented out, `workflow_dispatch` left so it can still be run
-  manually from the Actions tab occasionally.
-- **Watchlist auto-check** (`.github/workflows/check-watchlist.yml`) —
-  same treatment. Adding a card to the watchlist still runs one
-  immediate check (a single user-triggered action, not a recurring
-  job), but nothing re-checks it automatically afterward anymore.
-- **Manual search** — capped to the cheapest `SEARCH_MAX_LISTINGS_TO_EVALUATE`
-  (12) listings per search getting their own sold-comps lookup, instead
-  of every listing found (~20-30). The rest of the listings still show
-  up in the results (title, price, link) — they're not dropped, just
-  shown without a sold-comps line — since cheapest-first is a reasonable
-  proxy for "most likely underpriced" and the alternative (checking
-  everything) burns through a monthly budget in a handful of searches.
-  Both this and the watchlist's now-unused 5-per-check cap live in
-  `searchUnderpricedCards`'s `maxListingsToEvaluate` parameter in
-  `lib/cardComparison.ts`.
-
-Both scheduled workflows can be turned back on later by uncommenting
-their `schedule:` line — nothing about the underlying features was
-removed, just the unattended cadence that made them expensive.
+The eBay side has an equivalent split: Sports searches use category id
+`212` ("Sports Trading Cards"); Pokémon searches use `183454` ("CCG
+Individual Cards") — confirmed by searching "charizard pokemon card" with
+no category filter and checking which categories real listings actually
+fall under.
 
 ### Watchlist — adding cards and reviewing what's found
 
 `/cards` also has a **watchlist**: add a card, and it gets checked once
-immediately. Anything found underpriced gets saved to a review list that
-persists until you dismiss it — server-stored (not just your browser),
-so it's the same list regardless of which device you check it from. (The
-recurring automatic re-check this section used to describe is disabled —
-see "Sold-comps budget" just above.)
+immediately. Anything found underpriced *and* profitable gets saved to a
+review list that persists until you dismiss it — server-stored (not just
+your browser), so it's the same list regardless of which device you
+check it from.
+
+The automatic recurring re-check (every ~30 minutes via
+`.github/workflows/check-watchlist.yml`) is currently disabled — schedule
+commented out, `workflow_dispatch` left so it can still be triggered
+manually from the Actions tab. That was disabled specifically because of
+the sold-comps API's metered cost (an unattended job checking every
+listing for every watched card projected to tens of thousands of calls/
+month); PriceCharting doesn't have that same per-request billing concern,
+so re-enabling it now (uncomment the `schedule:` line) is a reasonable
+option if the every-30-min cadence is wanted back — just not done
+automatically as part of this revert, since it wasn't asked for.
 
 Adding a card runs one check immediately (takes a few seconds — it's a
 real eBay search + sold-comps check, the "Add" button shows "Checking…"
@@ -193,15 +183,15 @@ Dismissing isn't a good answer here: `dismissFind` (and `confirmFind`/
 (`card-dismissed-ids`) so a real, still-available deal would never be
 suggested again just because its cached data happened to be stale.
 Added a third option instead — "↻ Refresh reference" on each find in the
-review queue re-runs `getSoldComps` for that one listing's title right
-now and overwrites just its stored `soldComps`/`percentBelowReference` in
-place (`updateFindSoldComps` in `lib/db.ts`, `action: "refresh"` on
-`POST /api/cards/finds`) — the find stays exactly where it is, just with
-current data. This is the general answer to a problem that's come up
-more than once already: every future matching fix will only apply to new
-finds unless an existing one is explicitly refreshed, so this is the
-tool for "this looks wrong, is it actually still wrong under today's
-logic?" without losing the find either way.
+review queue re-runs `findCard` for that one listing's title right now
+and overwrites just its stored `reference`/`percentBelowReference`/
+`estimatedProfitDollars` in place (`updateFindReference` in `lib/db.ts`,
+`action: "refresh"` on `POST /api/cards/finds`) — the find stays exactly
+where it is, just with current data. This is the general answer to a
+problem that's come up more than once already: every future matching
+fix will only apply to new finds unless an existing one is explicitly
+refreshed, so this is the tool for "this looks wrong, is it actually
+still wrong under today's logic?" without losing the find either way.
 
 This needed two things the rest of the project doesn't use: an actual
 database, and a way to run checks on a schedule with nobody's browser
@@ -213,8 +203,9 @@ this needs). Connecting it auto-injects `KV_REST_API_URL` /
 `KV_REST_API_TOKEN`, which `lib/db.ts` reads automatically — no manual
 key-copying for this one.
 
-**Scheduling** (currently disabled, see "Sold-comps budget" above):
-Vercel's own Cron Jobs cap out at once per day on the free Hobby plan
+**Scheduling** (currently disabled, see "A brief detour through sold
+comps, and back" above): Vercel's own Cron Jobs cap out at once per day
+on the free Hobby plan
 (any more frequent schedule fails at deploy time) — too coarse for
 catching a listing before someone else buys it. Instead,
 `.github/workflows/check-watchlist.yml` was built to run on a GitHub
@@ -246,17 +237,18 @@ its own secret instead. All of this still exists and works — the
 
 ### Discover — finding deals without naming a card first
 
-**Currently disabled** — see "Sold-comps budget" above. Everything below
-describes what it does when run (manually, via `workflow_dispatch`, or
-with the schedule uncommented).
+**Currently disabled** — see "A brief detour through sold comps, and
+back" above. Everything below describes what it does when run (manually,
+via `workflow_dispatch`, or with the schedule uncommented).
 
 The watchlist only ever checks cards it's explicitly told about — it
 can't surface a card worth watching that nobody's added yet. Discover
 (`lib/cardDiscovery.ts`, `app/api/cards/discover/route.ts`, built to run
 hourly via `.github/workflows/discover-deals.yml`) fills that gap: it
 browses eBay's live listings directly (no keyword, just the category — Sports or
-Pokémon), checks each one against its own recent sold comps, and saves
-anything underpriced to the same "Saved finds" list as the watchlist.
+Pokémon), checks each one against its own PriceCharting match, and saves
+anything underpriced *and* profitable to the same "Saved finds" list as
+the watchlist.
 
 A few things this needed that a name-driven search doesn't — each found
 by actually running it live and looking at the real results, not assumed:
@@ -265,11 +257,13 @@ by actually running it live and looking at the real results, not assumed:
   with no `q` — confirmed live. Sorted by price ascending it was almost
   entirely near-worthless base commons (~$2-3); sorted by price
   descending it surfaced ultra-rare autographs/jerseys/1-of-1s instead —
-  those tend to have too little real sold history to compare against
-  reliably (often one sale, or none). Settled on **sorted by newest-
-  listed, within a $20-$300 band** (`lib/sources/ebay.ts`,
-  `browseCategory`) — the range with enough standard rookies/parallels
-  actually selling regularly to judge, not the extremes.
+  and *every one* of those came back matched against a wildly lower,
+  clearly-wrong PriceCharting reference (a $1500 1-of-10 autographed
+  jersey matched to an unrelated $6.50 base card), because PriceCharting's
+  catalog doesn't really cover one-of-a-kind memorabilia. Settled on
+  **sorted by newest-listed, within a $20-$300 band** (`lib/sources/ebay.ts`,
+  `browseCategory`) — the range PriceCharting's catalog actually covers
+  well (standard rookies/parallels), not the extremes.
 - **The Pokémon category isn't Pokémon-only.** eBay's `183454` ("CCG
   Individual Cards") turned out to be a shared bucket across every
   non-sports card game — a keyword-free browse of it came back full of
@@ -287,20 +281,27 @@ by actually running it live and looking at the real results, not assumed:
   lot/bundle titles; a second pattern in `lib/cardDiscovery.ts`
   (`NON_CARD_PATTERN`) catches the accessory/collection kind it doesn't.
 - **Match quality is genuinely lower than a deliberate search.** This is
-  worth being honest about: a freeform eBay title (year, set, parallel
-  name, serial number, and all) matched against sold comps with no human
-  choosing the search term is more likely to pull in the wrong parallel's
-  comps than a deliberately-typed watchlist name would. A higher bar than
-  the usual 20% (**25%**, `DISCOVERY_THRESHOLD_PERCENT`) adds a small
-  margin against this turning into a false "deal." The real safeguard
-  either way is the sold-comps link attached to every discovered find —
-  check that before trusting one, every time.
-- **API cost.** Each run makes one sold-comps lookup per browsed listing
-  (~25 per category × 2 categories per hourly run), on top of what the
-  watchlist already uses. That's why it runs hourly rather than every 30
-  minutes. Both the batch size (`limit` in `discoverDeals`) and the cron
-  schedule are easy to tune up or down depending on the sold-comps
-  service's own usage limits.
+  worth being honest about: testing live, feeding a full freeform eBay
+  title (year, set, parallel name, serial number, and all) into
+  PriceCharting's search frequently returned an unrelated product as the
+  top match rather than the right one — more often than not, in the
+  batches tested. The threshold direction protects against this turning
+  into a false "deal" (a bad match only becomes a problem if it happens
+  to look *underpriced*, and in every mismatch observed during testing it
+  went the other way — the listing was worth far more than whatever
+  unrelated product got matched, not less), so nothing false-positive
+  showed up in testing. But it does mean Discover may go a while between
+  genuine finds, and a higher bar than the usual 20%
+  (**25%**, `DISCOVERY_THRESHOLD_PERCENT`) adds a small further margin.
+  The real safeguard either way is the reference link attached to every
+  discovered find — check that before trusting one, every time.
+- **API cost.** Each run makes one PriceCharting lookup per browsed
+  listing (~25 per category × 2 categories per hourly run), on top of
+  what the watchlist already uses — noticeably more than the watchlist
+  alone. That's why it runs hourly rather than every 30 minutes. Both the
+  batch size (`limit` in `discoverDeals`) and the cron schedule are easy
+  to tune up or down depending on what PriceCharting's plan actually
+  allows.
 - **This actually broke in production, silently, for a while.** Both this
   endpoint and check-watchlist failed on every single scheduled run from
   the day they were set up — not a code bug, a missing GitHub Actions
@@ -311,18 +312,19 @@ by actually running it live and looking at the real results, not assumed:
   (`api.github.com/repos/.../actions/workflows/.../runs`) rather than
   guessing. Once those two secrets were actually added, a second, real
   bug surfaced: the original `discoverDeals` checked each browsed listing
-  one at a time in a loop — up to 25 sequential round-trips per category,
-  ~50 total per run — which was slow enough to exceed Vercel's serverless
-  function timeout outright (confirmed live: a production run got no
-  response at all after 60 seconds). Fixed with bounded concurrency
-  (`mapWithConcurrency` in `lib/cardDiscovery.ts`, 6 at a time — fully
-  unbounded, all 25 at once, risks looking like abusive traffic instead)
-  plus running both categories in parallel rather than sequentially, and
-  an explicit `export const maxDuration = 60` (Vercel Hobby's ceiling) as
-  a backstop. Confirmed live after the fix: full run in ~18 seconds.
+  against PriceCharting one at a time in a loop — up to 25 sequential
+  round-trips per category, ~50 total per run — which was slow enough to
+  exceed Vercel's serverless function timeout outright (confirmed live: a
+  production run got no response at all after 60 seconds). Fixed with
+  bounded concurrency (`mapWithConcurrency` in `lib/cardDiscovery.ts`,
+  6 at a time — fully unbounded, all 25 at once, risks looking like
+  abusive traffic to PriceCharting instead) plus running both categories
+  in parallel rather than sequentially, and an explicit
+  `export const maxDuration = 60` (Vercel Hobby's ceiling) as a backstop.
+  Confirmed live after the fix: full run in ~18 seconds.
 
-No separate setup needed — it reuses the same `EBAY_CLIENT_ID`/
-`EBAY_CLIENT_SECRET`, `SOLD_COMPS_API_KEY`, `CRON_SECRET`, and
+No separate setup needed — it reuses the same `PRICECHARTING_API_KEY`,
+`EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`, `CRON_SECRET`, and
 `DEAL_FINDER_URL` GitHub secret already configured for the watchlist.
 
 ### Player Search — the manual "browse a player, then check the margin" workflow
@@ -336,95 +338,50 @@ first part as a plain price-banded eBay browse (no comparison figure — a
 player name isn't one product) and the second as an on-demand "Check
 similar listings" button per result.
 
-#### Player Search's sold comps — real sold prices, not asking prices
+#### The sold-comps era, briefly (historical)
 
-"Check similar listings" originally compared against other **currently
-active** asking prices, since no eBay API key here gets access to sold/
-completed listing data (confirmed live: the scope that would need,
+"Check similar listings" used other **currently active** asking prices
+for a while, since no eBay API key here gets access to sold/completed
+listing data (confirmed live: the scope that would need,
 `buy.marketplace.insights`, comes back `invalid_scope` for this app's
 key — a separately-approved, restricted API most developer accounts
-don't have). The user supplied a paid third-party key for
-[api.sold-comps.com](https://sold-comps.com) (`SOLD_COMPS_API_KEY`, a
-scraper that returns real eBay sold history), so this now uses actual
-recent sold prices instead — a real upgrade, not a workaround: if every
-active seller of a card happens to be overpricing it right now, asking
-prices are inflated right along with them, but sold prices aren't.
-
-`lib/sources/soldComps.ts` wraps the API (`fetchSoldComps`); `getSoldComps`
-in `lib/soldComps.ts` filters out graded slabs and bundles, applies the
-print-run-denominator safety net (same pattern used elsewhere in this
-project), and returns a `SoldCompsSummary` — comp count, average/median
-sold price, the most recent sale, a direct link to eBay's own sold/
-completed search for that title (`soldSearchUrl`, the "verify" link), and
-the full list. The route (`app/api/cards/peer-check`) also takes the
-listing's own asking price, so the response can say directly "this
-listing is N% below the average recent sold price."
-
-**A real bug caught immediately:** the API's own condition/conditionId
-fields don't reliably separate graded slabs from raw cards (a PSA 10 came
-back as plain "New (Other)", confirmed live) — grading is detected from
-the title instead (`isLikelyGraded` in `lib/sources/soldComps.ts`), on
-the theory that a raw card's title has no reason to mention a grading
-company at all. And a lesson learned the same way earlier in this
-project for the (since-removed) PriceCharting matching: this API has no
-relevance scoring of its own, so feeding it a keyword-stripped
-query ("Luka Doncic silver prizm") for a "2018-19 Panini Prizm - Freshman
-Phenoms Luka Doncic #23 Silver Prizm" pulled in 21 loosely-related Silver
-Prizm comps spanning unrelated years/sets (median $3, one real sale of
-$129.99 buried in the noise) — the full, unstripped title correctly
-returned 11 tightly-matched Freshman Phenoms comps instead ($17.50-
-$129.99). Confirmed live before shipping, not assumed.
-
-#### Sold comps everywhere, not just Player Search
-
-Requested directly right after the above shipped: "I want all searches
-to have sold comps verify link and average of eBay sold listings" — not
-just the one-off "Check similar listings" button. `getSoldComps` moved
-out of `lib/playerSearch.ts` into its own `lib/soldComps.ts` (avoiding an
-import cycle: it needs `isBundle`, which needed to move to
-`lib/cardKeywords.ts` too, so both `cardComparison.ts` and `soldComps.ts`
-can use it without depending on each other) and is now called from every
-place a listing gets evaluated:
-
-- `evaluateListing` in `lib/cardComparison.ts` (the manual search page
-  and every watchlist check) — the sole comparison lookup per listing
-  now that PriceCharting is gone entirely (see "PriceCharting was
-  removed" above; at the time this shipped it ran alongside a
-  PriceCharting lookup instead, which is what first surfaced how useful
-  having both side by side actually was — a real example: a "2023 Panini
-  Prizm Draft Picks #57 Ja Morant" listing matched to a $450 PriceCharting
-  reference sat right next to "Sold comps: avg $2.82 across 18 sales," a
-  160x gap that was an obvious signal the PriceCharting match was wrong).
-- `discoverDeals` in `lib/cardDiscovery.ts` — the sole comparison lookup
-  for candidates as well now.
-- The "↻ Refresh reference" action (`app/api/cards/finds/route.ts`)
-  refreshes a find's sold comps, since they're a snapshot taken at
-  find-time (see "a saved find is a snapshot, not a live view" above).
-
-Once every listing check meant a paid API call instead of a free one,
-the actual request volume mattered in a way it hadn't before — see "Sold-
-comps budget" near the top of this section for what that forced (Discover
-and the watchlist auto-check disabled, manual search capped to the
-cheapest 12 listings per search).
+don't have) — that's back to the current behavior, described above.
+In between, a paid third-party key for
+[api.sold-comps.com](https://sold-comps.com) replaced that with real
+eBay sold history everywhere on this page (search, watchlist, Discover,
+Player Search, and a new Auction Sniper feature built specifically
+around it), until it was reverted back to PriceCharting/asking-price
+comparison (see "A brief detour through sold comps, and back" near the
+top of this section). None of that code exists anymore — see git history
+around commits mentioning "sold comps" if the specifics ever matter
+again. Two lessons from that period did carry over into how PriceCharting
+matching already worked: search with a listing's full raw title, never a
+keyword-stripped version, once something scores candidates instead of
+trusting position 0; and grading has to be detected differently
+depending on the data source, since not every API has eBay's structured
+`condition` field.
 
 #### Real profit, not just "underpriced" — `lib/resaleProfit.ts`
 
 Requested directly: "I want to be able to find cards on eBay that are
 undervalued so I can resell them for a profit... make my process more
-efficient." A raw "25% under average sold price" doesn't answer "is this
-actually worth buying" — eBay takes a real cut of the resale (confirmed
-live via web search against eBay's current published fee schedule, not
-assumed: **13.25%** of the sale total for Sports/Non-Sport Trading Cards
-and CCGs, up to $7,500, plus a flat **$0.30** (orders $10 or under) /
-**$0.40** (orders over $10) per order), and a cheap card's margin can get
-eaten entirely by that flat per-order fee alone.
+efficient." A raw "25% under reference" doesn't answer "is this actually
+worth buying" — eBay takes a real cut of the resale (confirmed live via
+web search against eBay's current published fee schedule, not assumed:
+**13.25%** of the sale total for Sports/Non-Sport Trading Cards and CCGs,
+up to $7,500, plus a flat **$0.30** (orders $10 or under) / **$0.40**
+(orders over $10) per order), and a cheap card's margin can get eaten
+entirely by that flat per-order fee alone. Built during this project's
+sold-comps period (see "A brief detour through sold comps, and back"
+above) and kept after reverting back to PriceCharting — judged useful
+regardless of which reference price feeds it.
 
 `estimateResaleProfitDollars` (`lib/resaleProfit.ts`) computes: cost to
 acquire (the listing's price **+ its own shipping cost**, pulled from
 eBay's `shippingOptions` — confirmed live against real search results,
 field is `item.shippingOptions[0].shippingCost.value`) vs. net proceeds
-from reselling at the average sold price (average sold price minus the
-estimated eBay fee on that amount). The result — `estimatedProfitDollars`
+from reselling at PriceCharting's reference price (reference price minus
+the estimated eBay fee on that amount). The result — `estimatedProfitDollars`
 on `CardListingResult`/`SavedFind` — is shown directly ("Est. profit:
 $12.40 after eBay fees" or "Est. loss: $1.10 after eBay fees", colored
 good/critical) and is now the **primary sort key** on the manual search
@@ -467,26 +424,25 @@ wraps this, deliberately with `cache: "no-store"` (not the 5-minute cache
 `searchListings` uses) since a stale current bid or end time defeats the
 entire point.
 
-Each auction gets the same per-listing sold-comps check and profit
-estimate as manual search (same `getSoldComps`/`estimateResaleProfitDollars`
-machinery, same `MIN_WORTHWHILE_PROFIT_DOLLARS`/12-listing cost cap,
-capped to the *soonest-ending* 12 rather than cheapest-12 — those are the
-actual candidates worth spending a lookup on), with one deliberate
-difference in framing: the profit shown is explicitly labeled "if won at
-this bid," never presented as a guaranteed number the way a Buy It Now
-listing's profit is. A live auction's current bid is not its final
-price — an auction with real time left, or bids already on it, can and
-does climb well past where it sits now. The `maxHours` filter ("ending
-within 1 hour / 6 hours / 24 hours / 3 days / any time") exists because
-sniping is inherently about a specific window to act in, not a general
-browse — an auction three days out with $0 profit potential *right now*
-tells you nothing about what it'll actually close at.
+Each auction gets the same per-listing PriceCharting check and profit
+estimate as manual search (same `findCard`/`buildReferenceInfo`/
+`estimateResaleProfitDollars` machinery, same `MIN_WORTHWHILE_PROFIT_DOLLARS`
+cost cap, capped to the *soonest-ending* 12 rather than cheapest-12 —
+those are the actual candidates worth spending a lookup on), with one
+deliberate difference in framing: the profit shown is explicitly labeled
+"if won at this bid," never presented as a guaranteed number the way a
+Buy It Now listing's profit is. A live auction's current bid is not its
+final price — an auction with real time left, or bids already on it, can
+and does climb well past where it sits now. The `maxHours` filter
+("ending within 1 hour / 6 hours / 24 hours / 3 days / any time") exists
+because sniping is inherently about a specific window to act in, not a
+general browse — an auction three days out with $0 profit potential
+*right now* tells you nothing about what it'll actually close at.
 
-Confirmed live: found a real example while testing — a "2024-25 Panini
-Mosaic Ja Morant #195" auction sitting at a **$1.00** bid with **0 bids**
-and **2h 39m** left, whose sold comps averaged **$12.41** across 19
-sales — an estimated **$8.37** profit if won at that bid, exactly the
-"nobody's found this yet" case this feature is built to surface.
+Didn't exist before the sold-comps period (this was requested and built
+during it), so there's no "old version" to revert to — it's adapted to
+compare against PriceCharting's reference price instead, the same way
+manual search was reverted.
 
 ### The keyword-extraction fix — why raw eBay titles make bad search queries
 
@@ -566,31 +522,34 @@ This is used in two places today: Player Search's peer-check (has a
 known subject from the search box) and the main search box/watchlist's
 eBay listings search (only when the query itself carries a serial
 number) — narrowing eBay's own keyword search, which has no relevance
-scoring to fall back on. It's never used to build the sold-comps query
-(`getSoldComps` always searches with the full raw title — see "Sold
-comps everywhere" above) for the same reason it stopped feeding the
-PriceCharting lookup before that was removed: once a scorer/ranker
-exists on the other end, stripping the query down is pure downside.
+scoring to fall back on. It's never used to build the PriceCharting
+lookup query (`findCard` in `lib/sources/pricecharting.ts` always
+searches with the full raw title): once a scorer/ranker exists on the
+other end — PriceCharting's own relevance scoring, described below —
+stripping the query down first is pure downside.
 
-### The rest of the PriceCharting-matching bug chain (historical)
+### The PriceCharting-matching bug chain
 
-Several more accuracy bugs got found and fixed in the PriceCharting-based
-version of this comparison before it was removed entirely — trusting
-whatever PriceCharting's search put first instead of scoring candidates
-(a `"Ja Morant Select Concourse"` search put an unrelated football card
-ahead of the real match), then a deeper architectural bug where one
-shared reference got applied to every listing in a broad search instead
-of each listing getting its own (a bare `"Luka doncic"` watchlist entry
-flagged a $29.99 listing as "45% under reference" against a completely
-unrelated $54.98 product, sharing nothing but a player's name), then the
-keyword-stripping-vs-relevance-scoring conflict described above. None of
-that code exists anymore — see git history around the "PriceCharting"
-commits if the specifics ever matter again — but the pattern across all
-of them (score candidates instead of trusting position 0; give each
-listing its own comparison, never a shared one; search with the full
-title once a scorer/ranker exists to make sense of it) is exactly what
-the sold-comps implementation above was built with from the start,
-rather than having to relearn each lesson a second time.
+Several accuracy bugs got found and fixed in this comparison, in order:
+trusting whatever PriceCharting's search put first instead of scoring
+candidates (a `"Ja Morant Select Concourse"` search put an unrelated
+football card ahead of the real match — fixed by `findCard`'s relevance
+scoring, which picks the best-scoring candidate rather than position 0),
+then a deeper architectural bug where one shared reference got applied
+to every listing in a broad search instead of each listing getting its
+own (a bare `"Luka doncic"` watchlist entry flagged a $29.99 listing as
+"45% under reference" against a completely unrelated $54.98 product,
+sharing nothing but a player's name — fixed by giving each listing its
+own `findCard` call in `evaluateListing`), then the
+keyword-stripping-vs-relevance-scoring conflict described above. The
+pattern across all of them — score candidates instead of trusting
+position 0; give each listing its own comparison, never a shared one;
+search with the full title once a scorer/ranker exists to make sense of
+it — is baked into `lib/sources/pricecharting.ts` and
+`lib/cardComparison.ts` today, including through the brief detour into
+sold comps and back (see "A brief detour through sold comps, and back"
+above): those modules kept the same rules rather than relearning the
+lessons a second time.
 
 ## Stack
 
@@ -884,20 +843,20 @@ site is wide open without it.
 - `lib/sources/keepa.ts` — Amazon price-drop search (needs your API key)
 - `lib/auth.ts`, `proxy.ts`, `app/login/` — the password gate
 - `app/cards/page.tsx`, `components/CardSearch.tsx` — manual card search
-- `lib/cardComparison.ts` — eBay listings vs. sold-comps comparison + filtering
+- `lib/cardComparison.ts` — eBay listings vs. PriceCharting reference comparison + profit filtering
 - `lib/sources/ebay.ts` — eBay listings/browse + the `CardCategory` type
-- `lib/soldComps.ts`, `lib/sources/soldComps.ts` — the sold-comps lookup (business logic + raw API client)
+- `lib/sources/pricecharting.ts` — the PriceCharting/SportsCardsPro lookup (relevance-scored product search)
 - `lib/db.ts` — Upstash Redis: watchlist, saved finds, My Picks, Mismatches, dismissed-ids
 - `components/CardWatchlist.tsx` — watchlist manager + saved-finds review UI
 - `app/api/cards/confirmed/route.ts`, `mismatches/route.ts` — My Picks / Mismatches endpoints
 - `app/api/cards/watchlist/bulk/route.ts` — bulk-add endpoint (no immediate check)
 - `app/api/cards/check-watchlist/route.ts` — the watchlist check endpoint
-- `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action (schedule currently disabled — see "Sold-comps budget")
+- `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action (schedule currently disabled — see "A brief detour through sold comps, and back")
 - `lib/cardDiscovery.ts` — browses eBay live listings for deals with no name given
 - `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the Discover run (schedule currently disabled)
 - `components/PlayerSearch.tsx`, `lib/playerSearch.ts` — price-banded player browse + peer-listing check
 - `app/api/cards/player-search/route.ts`, `app/api/cards/peer-check/route.ts` — their endpoints
-- `components/AuctionSnipe.tsx`, `lib/auctionSnipe.ts` — live auctions ending soonest, checked against sold comps
+- `components/AuctionSnipe.tsx`, `lib/auctionSnipe.ts` — live auctions ending soonest, checked against PriceCharting
 - `app/api/cards/auctions/route.ts` — its endpoint
 - `lib/resaleProfit.ts` — estimated resale profit after eBay's real selling fee and shipping cost
 - `lib/cardKeywords.ts` — rewrites a raw eBay title into a short, targeted search query (used for eBay's own keyword search only)

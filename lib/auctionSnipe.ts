@@ -1,7 +1,8 @@
 import { searchAuctionListings, type EbayAuctionListing, type CardCategory } from "@/lib/sources/ebay";
-import { isGraded, isBundle, MIN_WORTHWHILE_PROFIT_DOLLARS } from "@/lib/cardComparison";
+import { isGraded, isBundle, MIN_WORTHWHILE_PROFIT_DOLLARS, buildReferenceInfo } from "@/lib/cardComparison";
 import { extractSearchKeywords, extractSerialDenominator } from "@/lib/cardKeywords";
-import { getSoldComps, type SoldCompsSummary } from "@/lib/soldComps";
+import { findCard } from "@/lib/sources/pricecharting";
+import type { ReferenceInfo } from "@/lib/db";
 import { estimateResaleProfitDollars } from "@/lib/resaleProfit";
 import { mapWithConcurrency } from "@/lib/concurrency";
 
@@ -12,7 +13,7 @@ export type AuctionSnipeResult = EbayAuctionListing & {
   // so this is left negative rather than clamped to 0, which is itself
   // a useful signal ("this already ended, the listing is stale").
   minutesRemaining: number;
-  soldComps: SoldCompsSummary | null;
+  reference: ReferenceInfo | null;
   // Profit *if won at the current bid* — not a prediction of the final
   // price. An auction can close well above its current bid, especially
   // with real time left or existing bidders (see `bidCount`); this
@@ -24,43 +25,49 @@ export type AuctionSnipeResult = EbayAuctionListing & {
 };
 
 // Same budget discipline as manual search (SEARCH_MAX_LISTINGS_TO_EVALUATE
-// in lib/cardComparison.ts) — one sold-comps API call per auction
-// checked, against the same metered, paid API.
+// in lib/cardComparison.ts) — bounds concurrent PriceCharting requests
+// per search.
 const AUCTION_MAX_LISTINGS_TO_EVALUATE = 12;
 const LOOKUP_CONCURRENCY = 12;
 
-async function evaluateAuction(auction: EbayAuctionListing): Promise<AuctionSnipeResult> {
+async function evaluateAuction(auction: EbayAuctionListing, category: CardCategory): Promise<AuctionSnipeResult> {
   const currentBidDollars = auction.currentBidCents / 100;
   const minutesRemaining = Math.round((new Date(auction.endsAt).getTime() - Date.now()) / 60_000);
-  const soldComps = await getSoldComps(auction.title, currentBidDollars).catch(() => null);
 
-  if (!soldComps || soldComps.averageSoldPriceDollars <= 0) {
-    return { ...auction, currentBidDollars, minutesRemaining, soldComps: null, estimatedProfitDollars: null, isProfitable: false };
+  let reference;
+  try {
+    reference = await findCard(auction.title, category);
+  } catch {
+    reference = null;
   }
 
+  if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) {
+    return { ...auction, currentBidDollars, minutesRemaining, reference: null, estimatedProfitDollars: null, isProfitable: false };
+  }
+
+  const referenceInfo = await buildReferenceInfo(reference, category, false);
   const estimatedProfitDollars = estimateResaleProfitDollars(
     currentBidDollars,
     auction.shippingCents / 100,
-    soldComps.averageSoldPriceDollars
+    referenceInfo.ungradedPriceDollars
   );
   const isProfitable = estimatedProfitDollars >= MIN_WORTHWHILE_PROFIT_DOLLARS;
 
-  return { ...auction, currentBidDollars, minutesRemaining, soldComps, estimatedProfitDollars, isProfitable };
+  return { ...auction, currentBidDollars, minutesRemaining, reference: referenceInfo, estimatedProfitDollars, isProfitable };
 }
 
 /**
  * Live auctions for a card, soonest-ending first, each checked against
- * its own recent sold comps — same "each listing gets its own
- * comparison" rule as manual search, for the same reason (see
+ * its own best-matching PriceCharting product — same "each listing gets
+ * its own comparison" rule as manual search, for the same reason (see
  * evaluateListing in lib/cardComparison.ts). `maxHoursRemaining`, when
  * given, drops anything ending further out than that — sniping is about
  * acting in a specific window, not browsing every auction that exists
  * for a card.
  *
  * Capped to the soonest-ending `AUCTION_MAX_LISTINGS_TO_EVALUATE` for
- * the sold-comps lookup, same budget reasoning as manual search — the
- * rest are still returned (title, bid, time left, link), just without
- * their own comps/profit estimate.
+ * the PriceCharting lookup — the rest are still returned (title, bid,
+ * time left, link), just without their own reference/profit estimate.
  */
 export async function searchEndingAuctions(
   query: string,
@@ -89,12 +96,12 @@ export async function searchEndingAuctions(
   const toEvaluate = auctions.slice(0, AUCTION_MAX_LISTINGS_TO_EVALUATE);
   const toSkip = auctions.slice(AUCTION_MAX_LISTINGS_TO_EVALUATE);
 
-  const evaluated = await mapWithConcurrency(toEvaluate, LOOKUP_CONCURRENCY, evaluateAuction);
+  const evaluated = await mapWithConcurrency(toEvaluate, LOOKUP_CONCURRENCY, (a) => evaluateAuction(a, category));
   const skipped: AuctionSnipeResult[] = toSkip.map((a) => ({
     ...a,
     currentBidDollars: a.currentBidCents / 100,
     minutesRemaining: Math.round((new Date(a.endsAt).getTime() - Date.now()) / 60_000),
-    soldComps: null,
+    reference: null,
     estimatedProfitDollars: null,
     isProfitable: false,
   }));

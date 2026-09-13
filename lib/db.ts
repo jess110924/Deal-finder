@@ -1,6 +1,5 @@
 import { Redis } from "@upstash/redis";
 import type { CardCategory } from "@/lib/sources/ebay";
-import type { SoldCompsSummary } from "@/lib/soldComps";
 
 // Lazily constructed (not at module scope) so importing this file doesn't
 // eagerly instantiate a client — Redis.fromEnv() logs noisy warnings (and
@@ -63,6 +62,19 @@ export async function removeFromWatchlist(name: string, category: CardCategory):
   return next;
 }
 
+export type ReferenceInfo = {
+  productName: string;
+  ungradedPriceDollars: number;
+  imageUrl: string | null;
+  itemWebUrl: string | null;
+  ebaySearchUrl: string;
+  // The reference product's own page on PriceCharting/SportsCardsPro —
+  // the primary "verify this is the right card" link, since it's the
+  // actual source the reference price came from. Optional/absent on
+  // finds saved before this field existed.
+  productUrl?: string;
+};
+
 export type SavedFind = {
   itemId: string;
   title: string;
@@ -75,34 +87,29 @@ export type SavedFind = {
   // accurately on refresh. Absent on finds saved before this field
   // existed; treat missing as unknown/0, same default used elsewhere.
   shippingDollars?: number;
-  // Kept this name (not renamed to something like percentBelowAverageSold)
-  // deliberately: ~200 finds already exist in production Redis under this
-  // key, with no migration path for old records. What it's computed from
-  // changed (used to be PriceCharting's reference price, now it's
-  // soldComps.averageSoldPriceDollars) but the field itself didn't move.
   percentBelowReference: number;
   searchedFor: string;
   category: CardCategory;
   // "watchlist" = a card you explicitly added; "discovery" = surfaced
   // automatically by browsing eBay's live listings and checking each one
-  // against real sold comps, with no name given by you first. Discovery
+  // against PriceCharting, with no name given by you first. Discovery
   // matches are inherently noisier (a real search query vs. a freeform
-  // eBay title), so double-check `soldComps` before trusting one.
+  // eBay title), so double-check `reference` before trusting one.
   // Optional/absent on finds saved before this field existed — treat
   // missing as "watchlist" (the only source that existed then).
   source?: "watchlist" | "discovery";
-  // Real recent eBay sold prices for this exact title — what this find's
-  // price was actually compared against. Absent on finds saved before
-  // this field existed, or when no sold comps were found for this title.
-  soldComps?: SoldCompsSummary;
+  // What this find's price was actually compared against. Optional for
+  // the same backward-compatibility reason as `source`.
+  reference?: ReferenceInfo;
   // Estimated dollar profit after eBay's selling fee and this listing's
   // shipping cost — see lib/resaleProfit.ts. Absent on finds saved
   // before this field existed.
   estimatedProfitDollars?: number;
-  // Older finds saved before PriceCharting was removed carry a `reference`
-  // field too — not declared here since nothing reads it anymore, but it's
-  // harmless leftover data on those old Redis records, not something that
-  // needs cleaning up.
+  // A handful of finds saved during this project's brief period of
+  // comparing against real eBay sold prices instead of PriceCharting
+  // carry a `soldComps` field too — not declared here since nothing
+  // reads it anymore after reverting back to PriceCharting, but it's
+  // harmless leftover data on those specific Redis records.
   foundAt: string;
 };
 
@@ -131,24 +138,24 @@ export async function saveNewFinds(candidates: SavedFind[]): Promise<number> {
 }
 
 /**
- * Recomputes and overwrites just one find's stored `soldComps` (and the
- * `percentBelowReference` derived from it) in place. Requested directly:
- * a saved find is a snapshot from whenever it was found, so a later fix
- * to the matching logic doesn't retroactively apply to anything already
- * sitting in the review queue — a find saved with a since-fixed bug
- * stays wrong until either dismissed (losing it — not desirable for a
- * real deal) or refreshed.
+ * Recomputes and overwrites just one find's stored `reference` (and the
+ * `percentBelowReference`/`estimatedProfitDollars` derived from it) in
+ * place. Requested directly: a saved find is a snapshot from whenever
+ * it was found, so a later fix to the matching logic doesn't
+ * retroactively apply to anything already sitting in the review queue —
+ * a find saved with a since-fixed bug stays wrong until either dismissed
+ * (losing it — not desirable for a real deal) or refreshed.
  */
-export async function updateFindSoldComps(
+export async function updateFindReference(
   itemId: string,
-  soldComps: SoldCompsSummary,
+  reference: ReferenceInfo,
   percentBelowReference: number,
   estimatedProfitDollars?: number
 ): Promise<SavedFind | null> {
   const existing = await getFinds();
   const idx = existing.findIndex((f) => f.itemId === itemId);
   if (idx === -1) return null;
-  const updated: SavedFind = { ...existing[idx], soldComps, percentBelowReference, estimatedProfitDollars };
+  const updated: SavedFind = { ...existing[idx], reference, percentBelowReference, estimatedProfitDollars };
   const next = [...existing];
   next[idx] = updated;
   await getRedis().set(FINDS_KEY, next);

@@ -59,10 +59,10 @@ export default function AuctionSnipe() {
           Auction Sniper
         </h2>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Live auctions for a card, soonest-ending first, compared against real recent sold prices.
-          The current bid is <strong>not the final price</strong> — an auction with time left or
-          existing bids can still climb well past it. This is most useful for auctions ending very
-          soon with few or no bids yet, the ones nobody&apos;s found.
+          Live auctions for a card, soonest-ending first, compared against PriceCharting&apos;s
+          reference price. The current bid is <strong>not the final price</strong> — an auction with
+          time left or existing bids can still climb well past it. This is most useful for auctions
+          ending very soon with few or no bids yet, the ones nobody&apos;s found.
         </p>
       </div>
 
@@ -173,16 +173,15 @@ export default function AuctionSnipe() {
                 {auction.condition && (
                   <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{auction.condition}</div>
                 )}
-                {auction.soldComps && (
+                {auction.reference && (
                   <a
-                    href={auction.soldComps.soldSearchUrl}
+                    href={auction.reference.productUrl ?? auction.reference.itemWebUrl ?? auction.reference.ebaySearchUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-sm block mt-1"
                     style={{ color: "var(--series-1)", textDecoration: "underline" }}
                   >
-                    Sold comps: avg ${auction.soldComps.averageSoldPriceDollars.toFixed(2)} across{" "}
-                    {auction.soldComps.compCount} sale{auction.soldComps.compCount === 1 ? "" : "s"}
+                    vs ${auction.reference.ungradedPriceDollars.toFixed(2)} for &quot;{auction.reference.productName}&quot;
                   </a>
                 )}
                 <div className="flex items-center gap-2 mt-1.5 flex-wrap">

@@ -37,9 +37,7 @@ export function extractSerialDenominator(title: string): string | null {
 // mismatched. Caught this from a real result: a 5-card lot spanning three
 // different products (Hoops, Chronicles, Prizm Emergent) at $350 sitting
 // in results for a Prizm-only search, condition "New" so the grading
-// filter didn't (and shouldn't have) caught it. Lives here (not
-// cardComparison.ts) so both cardComparison.ts and lib/soldComps.ts can
-// use it without an import cycle between the two.
+// filter didn't (and shouldn't have) caught it.
 const LOT_PATTERN = /\b(lot of|lot\/|\(\d+\)|\d+[- ]card lot|bundle)\b/i;
 
 export function isBundle(title: string): boolean {

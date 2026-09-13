@@ -25,23 +25,22 @@ function FindHeroPhoto({ find }: { find: SavedFind }) {
   );
 }
 
-// Shared by Saved finds / My Picks / Mismatches — real recent eBay sold
-// prices for this exact title, the only comparison basis now that
-// PriceCharting has been removed entirely. Requested directly: "I want
-// all searches to have sold comps verify link and average of eBay sold
-// listings" / "remove the sportscardpro stuff."
-function SoldCompsLine({ find }: { find: SavedFind }) {
-  if (!find.soldComps) return null;
+// Shared by Saved finds / My Picks / Mismatches — the PriceCharting/
+// SportsCardsPro reference this find was actually compared against.
+// productUrl (the reference's own page) is the primary target — it's
+// the actual source the reference price came from. Older saved finds
+// predate this field, so fall back to the eBay-sourced links for those.
+function ReferenceLine({ find }: { find: SavedFind }) {
+  if (!find.reference) return null;
   return (
     <a
-      href={find.soldComps.soldSearchUrl}
+      href={find.reference.productUrl ?? find.reference.itemWebUrl ?? find.reference.ebaySearchUrl}
       target="_blank"
       rel="noopener noreferrer"
       className="text-sm block mt-1"
       style={{ color: "var(--series-1)", textDecoration: "underline" }}
     >
-      Sold comps: avg ${find.soldComps.averageSoldPriceDollars.toFixed(2)} across {find.soldComps.compCount} sale
-      {find.soldComps.compCount === 1 ? "" : "s"}
+      vs ${find.reference.ungradedPriceDollars.toFixed(2)} for &quot;{find.reference.productName}&quot;
     </a>
   );
 }
@@ -478,7 +477,7 @@ export default function CardWatchlist() {
                     {find.category && `${CATEGORY_LABEL[find.category]} · `}
                     {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                   </div>
-                  <SoldCompsLine find={find} />
+                  <ReferenceLine find={find} />
                   <EstimatedProfitLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
@@ -556,7 +555,7 @@ export default function CardWatchlist() {
                     {find.category && `${CATEGORY_LABEL[find.category]} · `}
                     {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                   </div>
-                  <SoldCompsLine find={find} />
+                  <ReferenceLine find={find} />
                   <EstimatedProfitLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
@@ -617,7 +616,7 @@ export default function CardWatchlist() {
                     {find.category && `${CATEGORY_LABEL[find.category]} · `}
                     {find.source === "discovery" ? "Discovered" : "Watchlist"}: {find.searchedFor}
                   </div>
-                  <SoldCompsLine find={find} />
+                  <ReferenceLine find={find} />
                   <EstimatedProfitLine find={find} />
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                     <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
