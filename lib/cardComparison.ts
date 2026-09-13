@@ -52,6 +52,13 @@ export type CardListingResult = EbayListing & {
   // it not selling at the assumed price) that a $1 "profit" doesn't
   // justify. See MIN_WORTHWHILE_PROFIT_DOLLARS.
   isProfitable: boolean;
+  // Whether this listing actually got a sold-comps API call at all, as
+  // opposed to being skipped past `maxListingsToEvaluate`. Needed
+  // because both "checked, but no comps were found" and "never checked"
+  // look identical otherwise (`soldComps: null`, `estimatedProfitDollars:
+  // null`) — without this, a UI summary like "N checked, M not checked"
+  // can't actually tell those two apart.
+  wasChecked: boolean;
 };
 
 export type CardSearchResult = {
@@ -109,6 +116,7 @@ async function evaluateListing(listing: EbayListing, category: CardCategory): Pr
       soldComps: null,
       estimatedProfitDollars: null,
       isProfitable: false,
+      wasChecked: true,
     };
   }
 
@@ -121,7 +129,16 @@ async function evaluateListing(listing: EbayListing, category: CardCategory): Pr
   );
   const isProfitable = estimatedProfitDollars >= MIN_WORTHWHILE_PROFIT_DOLLARS;
 
-  return { ...listing, priceDollars, percentBelowReference, isUnderpriced, soldComps, estimatedProfitDollars, isProfitable };
+  return {
+    ...listing,
+    priceDollars,
+    percentBelowReference,
+    isUnderpriced,
+    soldComps,
+    estimatedProfitDollars,
+    isProfitable,
+    wasChecked: true,
+  };
 }
 
 /**
@@ -217,6 +234,7 @@ export async function searchUnderpricedCards(
     soldComps: null,
     estimatedProfitDollars: null,
     isProfitable: false,
+    wasChecked: false,
   }));
   const listings = [...evaluated, ...skipped];
 

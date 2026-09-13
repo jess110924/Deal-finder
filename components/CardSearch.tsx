@@ -31,6 +31,16 @@ export default function CardSearch() {
     }
   }
 
+  // Only listings that clear MIN_WORTHWHILE_PROFIT_DOLLARS get shown —
+  // requested directly: "when I search a card it only shows profitable
+  // cards? The loss listings are pointless." Filtering here (not on the
+  // server) still requires checking every capped listing's sold comps to
+  // know which ones qualify — that check is what determines profitability
+  // in the first place, so it can't be skipped to "save" a request; this
+  // only stops showing the ones that didn't clear the bar once checked.
+  const checked = result?.listings.filter((l) => l.wasChecked) ?? [];
+  const profitable = result?.listings.filter((l) => l.isProfitable) ?? [];
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -39,12 +49,13 @@ export default function CardSearch() {
         </h1>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
           Search a card. Listings come from eBay&apos;s active Buy It Now inventory, compared against
-          real recent eBay sold prices for that exact title. Each listing shows an estimated resale
-          profit after eBay&apos;s actual ~13.25%+$0.30-0.40 selling fee and shipping cost — sorted
-          highest profit first, so the best flip is always at the top. Graded slabs (PSA/BGS/SGC) are
-          excluded — their prices aren&apos;t comparable to an ungraded average. To keep sold-comps
-          usage sustainable, only the 12 cheapest listings per search get checked — the rest still
-          show up below, just without a profit estimate.
+          real recent eBay sold prices for that exact title. Only listings with an estimated profit of
+          $5+ after eBay&apos;s actual ~13.25%+$0.30-0.40 selling fee and shipping cost are shown, sorted
+          highest profit first. Graded slabs (PSA/BGS/SGC) are excluded — their prices aren&apos;t
+          comparable to an ungraded average. To keep sold-comps usage sustainable, only the 12 cheapest
+          listings per search get checked — checking a listing is what tells us whether it&apos;s
+          profitable, so that part can&apos;t be skipped, but you&apos;re only shown the ones worth
+          acting on.
         </p>
       </div>
 
@@ -138,18 +149,18 @@ export default function CardSearch() {
           </div>
 
           <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            A broad search (just a player name, say) can return listings for many different cards, not
-            copies of the one above — each listing below is checked against its own sold comps, shown
-            under it, not necessarily the one above.
+            {result.listings.length} listing{result.listings.length === 1 ? "" : "s"} found · {checked.length} checked
+            against sold comps · {profitable.length} profitable
           </p>
 
           <div className="flex flex-col gap-2">
-            {result.listings.length === 0 && (
+            {profitable.length === 0 && (
               <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
-                No ungraded Buy It Now listings found.
+                No profitable listings in this search — {checked.length} checked,{" "}
+                {result.listings.length - checked.length} not checked (past the 12-listing cap).
               </p>
             )}
-            {result.listings.map((listing) => (
+            {profitable.map((listing) => (
               <div
                 key={listing.itemId}
                 className="rounded-lg overflow-hidden flex flex-col"
@@ -208,15 +219,10 @@ export default function CardSearch() {
                       </span>
                     )}
                   </div>
-                  {listing.estimatedProfitDollars != null && (
-                    <div
-                      className="text-sm font-semibold mt-1"
-                      style={{ color: listing.isProfitable ? "var(--good)" : "var(--critical)" }}
-                    >
-                      {listing.estimatedProfitDollars >= 0 ? "Est. profit" : "Est. loss"}: $
-                      {Math.abs(listing.estimatedProfitDollars).toFixed(2)} after eBay fees
-                    </div>
-                  )}
+                  {/* Every listing here already cleared MIN_WORTHWHILE_PROFIT_DOLLARS, so this is always a profit. */}
+                  <div className="text-sm font-semibold mt-1" style={{ color: "var(--good)" }}>
+                    Est. profit: ${listing.estimatedProfitDollars!.toFixed(2)} after eBay fees
+                  </div>
                 </div>
               </div>
             ))}
