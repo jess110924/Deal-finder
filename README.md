@@ -82,30 +82,72 @@ needed — Sports vs. Pokémon still drives which eBay category id gets
 searched, `212` vs `183454`) moved to `lib/sources/ebay.ts`, the one
 place it's still functionally used.
 
-### Watchlist — automatic background checking
+### Sold-comps budget: why Discover and the watchlist auto-check are disabled
 
-Beyond the one-off manual search above, `/cards` also has a **watchlist**:
-add a card, and it gets checked automatically roughly every 30 minutes from
-then on. Anything found underpriced gets saved to a review list that
-persists until you dismiss it — server-stored now (not just your browser),
-so it's the same list regardless of which device you check it from.
+The sold-comps API (`SOLD_COMPS_API_KEY`) is a paid, metered third-party
+service (2,000 or 10,000 calls/month, depending on plan) — a different
+cost model from every other API this project uses, all free. Wiring sold
+comps into every listing of every automatic background job (see "Sold
+comps everywhere" below) without accounting for that turned out to be a
+real problem once actually measured: Discover alone projected to ~32,000
+calls/month, and the watchlist's 30-minute auto-check to ~34,500 calls/
+month for a *single* watched card — both individually blow past even the
+largest tier.
 
-Adding a card also runs one check immediately (takes a few seconds — it's
-a real eBay search + sold-comps check, the "Add" button shows "Checking…"
-while it runs) rather than only registering the card and leaving you
-waiting up to 30 minutes with nothing to look at. If that immediate check
-happens to fail for some reason, the card still gets added to the
-watchlist regardless — it'll just pick up on the next scheduled run
-instead, and a message says as much rather than acting like the add
-itself failed.
+Decided directly, after seeing those numbers, to disable both entirely
+and put the whole budget toward manual search instead — that's the
+actual "search a card, find price differences" workflow this is for,
+and it's the one place cost is naturally bounded by how often a person
+searches, not by an unattended job running on a fixed schedule
+regardless of whether anyone's looking:
+
+- **Discover** (`.github/workflows/discover-deals.yml`) — schedule
+  commented out, `workflow_dispatch` left so it can still be run
+  manually from the Actions tab occasionally.
+- **Watchlist auto-check** (`.github/workflows/check-watchlist.yml`) —
+  same treatment. Adding a card to the watchlist still runs one
+  immediate check (a single user-triggered action, not a recurring
+  job), but nothing re-checks it automatically afterward anymore.
+- **Manual search** — capped to the cheapest `SEARCH_MAX_LISTINGS_TO_EVALUATE`
+  (12) listings per search getting their own sold-comps lookup, instead
+  of every listing found (~20-30). The rest of the listings still show
+  up in the results (title, price, link) — they're not dropped, just
+  shown without a sold-comps line — since cheapest-first is a reasonable
+  proxy for "most likely underpriced" and the alternative (checking
+  everything) burns through a monthly budget in a handful of searches.
+  Both this and the watchlist's now-unused 5-per-check cap live in
+  `searchUnderpricedCards`'s `maxListingsToEvaluate` parameter in
+  `lib/cardComparison.ts`.
+
+Both scheduled workflows can be turned back on later by uncommenting
+their `schedule:` line — nothing about the underlying features was
+removed, just the unattended cadence that made them expensive.
+
+### Watchlist — adding cards and reviewing what's found
+
+`/cards` also has a **watchlist**: add a card, and it gets checked once
+immediately. Anything found underpriced gets saved to a review list that
+persists until you dismiss it — server-stored (not just your browser),
+so it's the same list regardless of which device you check it from. (The
+recurring automatic re-check this section used to describe is disabled —
+see "Sold-comps budget" just above.)
+
+Adding a card runs one check immediately (takes a few seconds — it's a
+real eBay search + sold-comps check, the "Add" button shows "Checking…"
+while it runs, capped to the cheapest 5 listings for the same budget
+reasons as above) rather than only registering the card with nothing to
+look at. If that immediate check happens to fail for some reason, the
+card still gets added to the watchlist regardless — a message says the
+check itself failed rather than acting like the add did.
 
 There's also a **bulk add** option ("Add multiple cards at once" link
 under the search box) for seeding the watchlist with many cards in one
 shot instead of typing them one at a time — paste one card per line (or
 comma-separated). Bulk-added cards skip the immediate check (running a
-real search for 15-20+ cards sequentially would risk timing out) and
-just get picked up on the next scheduled run, same as any other add that
-happens to miss its instant check.
+real search for 15-20+ cards sequentially would risk timing out, on top
+of the sold-comps cost of doing so) — with the auto-check disabled, a
+bulk-added card just sits on the list until you manually search it or
+the auto-check is turned back on.
 
 #### Triaging a find: My Picks and Mismatches
 
@@ -130,7 +172,8 @@ queue now has three actions instead of one:
   or price too high) and doesn't need to go anywhere.
 
 Both new actions also mark the find dismissed internally (same
-mechanism `dismissFind` already used), so a future scheduled check
+mechanism `dismissFind` already used), so a future check (an on-add
+check, a manual search, or the auto-check if it's turned back on)
 doesn't just re-add the same listing right back into the review queue
 after you've already triaged it. Both new sections have their own
 "Remove"/"Clear" action to take something back out once you're done
@@ -170,15 +213,17 @@ this needs). Connecting it auto-injects `KV_REST_API_URL` /
 `KV_REST_API_TOKEN`, which `lib/db.ts` reads automatically — no manual
 key-copying for this one.
 
-**Scheduling**: Vercel's own Cron Jobs cap out at once per day on the free
-Hobby plan (any more frequent schedule fails at deploy time) — too coarse
-for catching a listing before someone else buys it. Instead,
-`.github/workflows/check-watchlist.yml` runs on a GitHub Actions schedule
-every 30 minutes (no such cap there, and it's free) and calls
-`POST /api/cards/check-watchlist` on the deployed site. That endpoint sits
-outside the site's normal cookie-based login (see `proxy.ts`) since a
-script has no browser session to present — it checks its own secret
-instead.
+**Scheduling** (currently disabled, see "Sold-comps budget" above):
+Vercel's own Cron Jobs cap out at once per day on the free Hobby plan
+(any more frequent schedule fails at deploy time) — too coarse for
+catching a listing before someone else buys it. Instead,
+`.github/workflows/check-watchlist.yml` was built to run on a GitHub
+Actions schedule every 30 minutes (no such cap there, and it's free) and
+call `POST /api/cards/check-watchlist` on the deployed site. That
+endpoint sits outside the site's normal cookie-based login (see
+`proxy.ts`) since a script has no browser session to present — it checks
+its own secret instead. All of this still exists and works — the
+`schedule:` trigger is just commented out.
 
 #### Setup
 
@@ -193,17 +238,23 @@ instead.
    deployed site's URL (e.g. `https://deal-finder-yourname.vercel.app`,
    **no trailing slash**)
 4. Redeploy (any push does this, or trigger one manually)
-5. To test without waiting up to 30 minutes: on GitHub, go to **Actions**
-   tab → "Check card watchlist" workflow → **Run workflow** button
-   (works because of the `workflow_dispatch` trigger in the yml file)
+5. To manually trigger a check (the automatic schedule is disabled): on
+   GitHub, go to **Actions** tab → "Check card watchlist" workflow →
+   **Run workflow** button (works because of the `workflow_dispatch`
+   trigger in the yml file) — or uncomment the `schedule:` line in the
+   workflow file to turn automatic checks back on.
 
 ### Discover — finding deals without naming a card first
 
+**Currently disabled** — see "Sold-comps budget" above. Everything below
+describes what it does when run (manually, via `workflow_dispatch`, or
+with the schedule uncommented).
+
 The watchlist only ever checks cards it's explicitly told about — it
 can't surface a card worth watching that nobody's added yet. Discover
-(`lib/cardDiscovery.ts`, `app/api/cards/discover/route.ts`, runs hourly
-via `.github/workflows/discover-deals.yml`) fills that gap: it browses
-eBay's live listings directly (no keyword, just the category — Sports or
+(`lib/cardDiscovery.ts`, `app/api/cards/discover/route.ts`, built to run
+hourly via `.github/workflows/discover-deals.yml`) fills that gap: it
+browses eBay's live listings directly (no keyword, just the category — Sports or
 Pokémon), checks each one against its own recent sold comps, and saves
 anything underpriced to the same "Saved finds" list as the watchlist.
 
@@ -349,6 +400,12 @@ place a listing gets evaluated:
 - The "↻ Refresh reference" action (`app/api/cards/finds/route.ts`)
   refreshes a find's sold comps, since they're a snapshot taken at
   find-time (see "a saved find is a snapshot, not a live view" above).
+
+Once every listing check meant a paid API call instead of a free one,
+the actual request volume mattered in a way it hadn't before — see "Sold-
+comps budget" near the top of this section for what that forced (Discover
+and the watchlist auto-check disabled, manual search capped to the
+cheapest 12 listings per search).
 
 ### The keyword-extraction fix — why raw eBay titles make bad search queries
 
@@ -753,10 +810,10 @@ site is wide open without it.
 - `components/CardWatchlist.tsx` — watchlist manager + saved-finds review UI
 - `app/api/cards/confirmed/route.ts`, `mismatches/route.ts` — My Picks / Mismatches endpoints
 - `app/api/cards/watchlist/bulk/route.ts` — bulk-add endpoint (no immediate check)
-- `app/api/cards/check-watchlist/route.ts` — the scheduled check endpoint
-- `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action
+- `app/api/cards/check-watchlist/route.ts` — the watchlist check endpoint
+- `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action (schedule currently disabled — see "Sold-comps budget")
 - `lib/cardDiscovery.ts` — browses eBay live listings for deals with no name given
-- `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the hourly Discover run
+- `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the Discover run (schedule currently disabled)
 - `components/PlayerSearch.tsx`, `lib/playerSearch.ts` — price-banded player browse + peer-listing check
 - `app/api/cards/player-search/route.ts`, `app/api/cards/peer-check/route.ts` — their endpoints
 - `lib/cardKeywords.ts` — rewrites a raw eBay title into a short, targeted search query (used for eBay's own keyword search only)

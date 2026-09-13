@@ -1,12 +1,20 @@
 name: Check card watchlist
 
-# Runs every 30 minutes. GitHub Actions doesn't guarantee exact timing under
-# load (a few minutes of drift is normal), but has no once-a-day cap the
-# way Vercel's free Hobby-tier cron does — that restriction is what this
-# workflow exists to route around, at no extra cost.
+# DISABLED (schedule commented out) — requested directly: decided to
+# stick to manual search as the primary workflow and put the whole
+# sold-comps budget toward that, rather than split it with an unattended
+# recurring check. At 5 listings/check this still projected to ~7,200
+# sold-comps calls/month for a single watched card, which alone eats most
+# of even the 10,000/month paid tier. Adding a card to the watchlist
+# still runs one immediate check right away (see the watchlist route's
+# POST handler) — that's a single, user-triggered check, not a recurring
+# background job, so it stays. `workflow_dispatch` is left in place to
+# run this manually (Actions tab -> "Check card watchlist" -> "Run
+# workflow") if wanted occasionally, and the schedule line can be
+# uncommented to turn automatic checks back on later.
 on:
-  schedule:
-    - cron: "*/30 * * * *"
+  # schedule:
+  #   - cron: "*/30 * * * *"
   workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
 
 jobs:

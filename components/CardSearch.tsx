@@ -40,7 +40,9 @@ export default function CardSearch() {
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
           Search a card. Listings come from eBay&apos;s active Buy It Now inventory; the comparison is
           against real recent eBay sold prices for that exact title, not an estimate. Graded slabs
-          (PSA/BGS/SGC) are excluded — their prices aren&apos;t comparable to an ungraded average.
+          (PSA/BGS/SGC) are excluded — their prices aren&apos;t comparable to an ungraded average. To
+          keep sold-comps usage sustainable, only the 12 cheapest listings per search get checked —
+          the rest still show up below, just without a sold-comps line.
         </p>
       </div>
 

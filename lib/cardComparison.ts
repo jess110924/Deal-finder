@@ -54,6 +54,15 @@ export type CardSearchResult = {
 
 export const UNDERPRICED_THRESHOLD_PERCENT = 20;
 
+// Cheapest 12 listings per manual search get their own sold-comps
+// lookup — chosen as a middle ground (roughly half of a typical ~20-30
+// listing search) between thoroughness and the sold-comps API's metered
+// cost. Requested directly: "making my manual search the most
+// efficient" after realizing the unattended jobs' cost — this is the
+// equivalent cap for the interactive search page, now that it's the
+// sole place the sold-comps budget goes.
+export const SEARCH_MAX_LISTINGS_TO_EVALUATE = 12;
+
 const LOOKUP_CONCURRENCY = 12;
 
 /**
@@ -83,24 +92,30 @@ async function evaluateListing(listing: EbayListing, category: CardCategory): Pr
 
 /**
  * `maxListingsToEvaluate` caps how many listings get their own sold-comps
- * lookup (the expensive part — one paid API call each) — left unlimited
- * for the interactive search page (a user asked for this specific search,
- * bounded by how often they actually search), but the watchlist's
- * automated background check passes a small number here. Requested
- * directly after realizing the unattended jobs' actual cost: checking
- * every listing (~20-25) for every watched card, every 30 minutes, was
- * projected at ~34,500 sold-comps calls/month for a *single* watched
- * card against a paid API metered at 2,000-10,000/month. Capped to the
- * cheapest N listings — cheapest-first is a reasonable proxy for "most
+ * lookup (the expensive part — one paid API call each) against a metered,
+ * paid API (2,000-10,000 calls/month, depending on plan). Checking every
+ * listing (~20-30 per search) adds up fast across repeated manual
+ * searches, and adds up even faster for an unattended recurring job —
+ * checking every listing for every watched card, every 30 minutes,
+ * projected to ~34,500 sold-comps calls/month for a *single* watched
+ * card, which is why the watchlist's automatic check was dropped
+ * entirely (see `.github/workflows/check-watchlist.yml`) in favor of
+ * putting the whole budget toward manual search instead.
+ *
+ * Capped listings beyond the limit are NOT dropped from the results —
+ * they're still returned (title, price, link), just without their own
+ * sold comps, so a manual search still shows everything eBay actually
+ * has rather than silently hiding results. Only the cheapest N get the
+ * expensive lookup: cheapest-first is a reasonable proxy for "most
  * likely underpriced" even before their own comps are known, and a real
- * deal is exactly what this is trying to catch, not exhaustive coverage
- * of every listing that exists.
+ * deal is exactly what this app is trying to catch, not exhaustive
+ * coverage of every listing that exists.
  *
  * `includeSummary` skips the *overall query's own* sold-comps lookup (an
  * extra API call, shown at the top of the manual search page for
- * context) — the watchlist's background check passes false here since
- * `checkCardAndSaveFinds` never reads `result.soldComps` at all; that
- * call was pure waste on every single automated check.
+ * context) — pass false for a caller that never reads `result.soldComps`
+ * (e.g. `checkCardAndSaveFinds` below), since that call would otherwise
+ * be pure waste.
  */
 export async function searchUnderpricedCards(
   query: string,
@@ -143,18 +158,31 @@ export async function searchUnderpricedCards(
   // Cheapest-first cap — see the doc comment on `maxListingsToEvaluate`.
   // Sorting by raw asking price here (not by anything comps-derived,
   // since comps don't exist yet) is the only ordering available before
-  // spending the API calls that would tell us more.
+  // spending the API calls that would tell us more. The listings past
+  // the cap are kept, not discarded — they just don't get their own
+  // sold-comps lookup (`toSkip` below), same as a listing whose lookup
+  // simply found nothing.
+  let toEvaluate = ungradedListings;
+  let toSkip: EbayListing[] = [];
   if (maxListingsToEvaluate != null && ungradedListings.length > maxListingsToEvaluate) {
-    ungradedListings = [...ungradedListings]
-      .sort((a, b) => a.priceCents - b.priceCents)
-      .slice(0, maxListingsToEvaluate);
+    const sorted = [...ungradedListings].sort((a, b) => a.priceCents - b.priceCents);
+    toEvaluate = sorted.slice(0, maxListingsToEvaluate);
+    toSkip = sorted.slice(maxListingsToEvaluate);
   }
 
   // Each listing checked against its own comps, not the shared `soldComps`
   // above — see evaluateListing's doc comment for why. Bounded
   // concurrency for the same reason Discover uses it: sequential would
   // be far too slow for a search returning up to 30 listings.
-  const listings = await mapWithConcurrency(ungradedListings, LOOKUP_CONCURRENCY, (l) => evaluateListing(l, category));
+  const evaluated = await mapWithConcurrency(toEvaluate, LOOKUP_CONCURRENCY, (l) => evaluateListing(l, category));
+  const skipped: CardListingResult[] = toSkip.map((l) => ({
+    ...l,
+    priceDollars: l.priceCents / 100,
+    percentBelowReference: null,
+    isUnderpriced: false,
+    soldComps: null,
+  }));
+  const listings = [...evaluated, ...skipped];
 
   // Best deals (most below average sold price) first, then everything else by price.
   listings.sort((a, b) => {

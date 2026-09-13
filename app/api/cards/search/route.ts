@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchUnderpricedCards, type CardCategory } from "@/lib/cardComparison";
+import { searchUnderpricedCards, SEARCH_MAX_LISTINGS_TO_EVALUATE, type CardCategory } from "@/lib/cardComparison";
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim();
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const category: CardCategory = categoryParam === "pokemon" ? "pokemon" : "sports";
 
   try {
-    const result = await searchUnderpricedCards(query, category);
+    const result = await searchUnderpricedCards(query, category, SEARCH_MAX_LISTINGS_TO_EVALUATE);
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
