@@ -446,7 +446,7 @@ export default function CardWatchlist() {
         </h2>
         <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
           Review each one: if you check it and it&apos;s a real, exact-match deal, save it to My Picks below.
-          If the sold comps are actually for the wrong card, flag it as a mismatch instead of just
+          If the reference is actually for the wrong card, flag it as a mismatch instead of just
           dismissing it — that list gets used to actually fix the matching logic.
         </p>
         {!loading && finds.length === 0 && (
@@ -562,7 +562,7 @@ export default function CardWatchlist() {
                       ${find.priceDollars.toFixed(2)}
                     </span>
                     <span className="text-xs font-semibold" style={{ color: "var(--good)" }}>
-                      {find.percentBelowReference.toFixed(0)}% under average sold
+                      {find.percentBelowReference.toFixed(0)}% under reference
                     </span>
                     <button
                       onClick={() => removeFromList(find.itemId, "confirmed")}
@@ -586,11 +586,11 @@ export default function CardWatchlist() {
         <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
           Finds you&apos;ve checked and found to be comparing against the wrong card. Kept here (not just
           dismissed) so these can be reviewed to fix the matching logic — worth sharing the title and
-          sold comps shown below when reporting one.
+          reference shown below when reporting one.
         </p>
         {!loading && mismatches.length === 0 && (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            None flagged — use &quot;Flag mismatch&quot; on a find above when the sold comps are wrong.
+            None flagged — use &quot;Flag mismatch&quot; on a find above when the reference is wrong.
           </p>
         )}
         <div className="flex flex-col gap-2">

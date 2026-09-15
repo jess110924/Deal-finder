@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CardCategory } from "@/lib/cardComparison";
 import type { EbayListing } from "@/lib/sources/ebay";
 import type { PeerComparison } from "@/lib/playerSearch";
@@ -20,6 +20,72 @@ export default function PlayerSearch() {
   const [error, setError] = useState<string | null>(null);
   const [peerChecks, setPeerChecks] = useState<Record<string, PeerState>>({});
   const [expandedPeerList, setExpandedPeerList] = useState<Record<string, boolean>>({});
+  const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
+  const [favoritingIds, setFavoritingIds] = useState<Set<string>>(new Set());
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/cards/favorites")
+      .then((res) => res.json())
+      .then((json) => setFavoritedIds(new Set((json.favorites ?? []).map((f: { itemId: string }) => f.itemId))))
+      .catch(() => {});
+  }, []);
+
+  // Optimistic, with rollback on failure — same pattern as the watchlist/
+  // finds actions in CardWatchlist.tsx, so a failed toggle (e.g. Redis not
+  // configured locally) doesn't leave the star showing a state that was
+  // never actually saved.
+  async function toggleFavorite(listing: EbayListing) {
+    const isFavorited = favoritedIds.has(listing.itemId);
+    setFavoritingIds((prev) => new Set(prev).add(listing.itemId));
+    setFavoriteError(null);
+    setFavoritedIds((prev) => {
+      const next = new Set(prev);
+      if (isFavorited) next.delete(listing.itemId);
+      else next.add(listing.itemId);
+      return next;
+    });
+    try {
+      const res = isFavorited
+        ? await fetch("/api/cards/favorites", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ itemId: listing.itemId }),
+          })
+        : await fetch("/api/cards/favorites", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              itemId: listing.itemId,
+              title: listing.title,
+              priceDollars: listing.priceCents / 100,
+              itemWebUrl: listing.itemWebUrl,
+              imageUrl: listing.imageUrl,
+              condition: listing.condition,
+              category,
+              searchedFor: query.trim(),
+            }),
+          });
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error || `Request failed: ${res.status}`);
+      }
+    } catch (err) {
+      setFavoritedIds((prev) => {
+        const next = new Set(prev);
+        if (isFavorited) next.add(listing.itemId);
+        else next.delete(listing.itemId);
+        return next;
+      });
+      setFavoriteError((err as Error).message);
+    } finally {
+      setFavoritingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(listing.itemId);
+        return next;
+      });
+    }
+  }
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -68,7 +134,8 @@ export default function PlayerSearch() {
           interesting, then check what other currently-listed copies of that exact card are asking — no eBay API
           gives access to actual sold prices, so this compares against other active asking prices, not sales
           history. If a card is priced well below what everyone else is asking for the same one, that's the
-          signal to look closer.
+          signal to look closer. Star (★) any listing to save it to Favorites below, so you can find it again later
+          without re-running the search.
         </p>
       </div>
 
@@ -148,6 +215,12 @@ export default function PlayerSearch() {
         </div>
       )}
 
+      {favoriteError && (
+        <div className="rounded-md px-3 py-2 text-sm" style={{ color: "var(--critical)" }}>
+          Couldn&apos;t save favorite: {favoriteError}
+        </div>
+      )}
+
       {listings && listings.length === 0 && (
         <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
           No ungraded Buy It Now listings found in that price range.
@@ -165,6 +238,15 @@ export default function PlayerSearch() {
                 style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
               >
                 <div className="flex gap-3 items-center">
+                  <button
+                    onClick={() => toggleFavorite(listing)}
+                    disabled={favoritingIds.has(listing.itemId)}
+                    aria-label={favoritedIds.has(listing.itemId) ? "Remove from favorites" : "Save to favorites"}
+                    className="shrink-0 text-xl leading-none"
+                    style={{ color: favoritedIds.has(listing.itemId) ? "var(--series-1)" : "var(--text-muted)" }}
+                  >
+                    {favoritedIds.has(listing.itemId) ? "★" : "☆"}
+                  </button>
                   {listing.imageUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img

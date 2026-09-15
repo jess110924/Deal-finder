@@ -27,11 +27,13 @@ const FINDS_KEY = "card-finds";
 const DISMISSED_KEY = "card-dismissed-ids";
 const CONFIRMED_KEY = "card-confirmed";
 const MISMATCH_KEY = "card-mismatches";
+const FAVORITES_KEY = "card-favorites";
 
 const MAX_FINDS = 200;
 const MAX_DISMISSED = 1000;
 const MAX_CONFIRMED = 500;
 const MAX_MISMATCHES = 200;
+const MAX_FAVORITES = 500;
 
 export type WatchlistEntry = { name: string; category: CardCategory };
 
@@ -247,4 +249,45 @@ export async function removeMismatch(itemId: string): Promise<void> {
     MISMATCH_KEY,
     mismatches.filter((f) => f.itemId !== itemId)
   );
+}
+
+// A starred listing from Player Search, kept to look at later — separate
+// from the watchlist/finds flow above (that one's a name-driven,
+// automatically-rechecked queue; this is "I saw this specific listing and
+// want to remember it," no rechecking involved). Snapshotted at the time
+// you star it, same reasoning as SavedFind: the price/listing shown later
+// is whatever it was when you favorited it, not a live re-fetch.
+export type FavoriteCard = {
+  itemId: string;
+  title: string;
+  priceDollars: number;
+  itemWebUrl: string;
+  imageUrl: string | null;
+  condition: string | null;
+  category: CardCategory;
+  // The player/search term this listing was found under — Player
+  // Search's own query box, so a later look back at favorites still shows
+  // what you were searching for when you starred it.
+  searchedFor: string;
+  favoritedAt: string;
+};
+
+export async function getFavorites(): Promise<FavoriteCard[]> {
+  return (await getRedis().get<FavoriteCard[]>(FAVORITES_KEY)) ?? [];
+}
+
+/** Adds a favorite, most-recent first. No-op if this listing is already favorited. */
+export async function addFavorite(card: Omit<FavoriteCard, "favoritedAt">): Promise<FavoriteCard[]> {
+  const current = await getFavorites();
+  if (current.some((f) => f.itemId === card.itemId)) return current;
+  const next = [{ ...card, favoritedAt: new Date().toISOString() }, ...current].slice(0, MAX_FAVORITES);
+  await getRedis().set(FAVORITES_KEY, next);
+  return next;
+}
+
+export async function removeFavorite(itemId: string): Promise<FavoriteCard[]> {
+  const current = await getFavorites();
+  const next = current.filter((f) => f.itemId !== itemId);
+  await getRedis().set(FAVORITES_KEY, next);
+  return next;
 }

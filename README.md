@@ -338,6 +338,21 @@ first part as a plain price-banded eBay browse (no comparison figure — a
 player name isn't one product) and the second as an on-demand "Check
 similar listings" button per result.
 
+Each result also has a star (☆/★) — requested directly ("save certain
+cards that I like so I can look at it later"). Starring POSTs a snapshot
+of that listing (title, price, photo, condition, category, and the
+player you searched for) to Redis via `lib/db.ts`'s `addFavorite`/
+`getFavorites`/`removeFavorite` and `app/api/cards/favorites/route.ts`;
+`components/CardFavorites.tsx` renders the saved list further down the
+page. It's a separate, simpler flow from the watchlist above: no
+rechecking, no reference price, no profit math — just "I saw this and
+want to find it again," so what's shown later is exactly the snapshot
+from when you starred it, not a live re-fetch (the listing may have
+sold or changed price since). The star toggle is optimistic with
+rollback on failure, same pattern as the watchlist actions below, so a
+failed save (e.g. Redis not configured) doesn't leave a star looking
+saved when it isn't.
+
 #### The sold-comps era, briefly (historical)
 
 "Check similar listings" used other **currently active** asking prices
@@ -846,7 +861,7 @@ site is wide open without it.
 - `lib/cardComparison.ts` — eBay listings vs. PriceCharting reference comparison + profit filtering
 - `lib/sources/ebay.ts` — eBay listings/browse + the `CardCategory` type
 - `lib/sources/pricecharting.ts` — the PriceCharting/SportsCardsPro lookup (relevance-scored product search)
-- `lib/db.ts` — Upstash Redis: watchlist, saved finds, My Picks, Mismatches, dismissed-ids
+- `lib/db.ts` — Upstash Redis: watchlist, saved finds, My Picks, Mismatches, dismissed-ids, favorites
 - `components/CardWatchlist.tsx` — watchlist manager + saved-finds review UI
 - `app/api/cards/confirmed/route.ts`, `mismatches/route.ts` — My Picks / Mismatches endpoints
 - `app/api/cards/watchlist/bulk/route.ts` — bulk-add endpoint (no immediate check)
@@ -856,6 +871,7 @@ site is wide open without it.
 - `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the Discover run (schedule currently disabled)
 - `components/PlayerSearch.tsx`, `lib/playerSearch.ts` — price-banded player browse + peer-listing check
 - `app/api/cards/player-search/route.ts`, `app/api/cards/peer-check/route.ts` — their endpoints
+- `components/CardFavorites.tsx`, `app/api/cards/favorites/route.ts` — Player Search's star/favorite list
 - `components/AuctionSnipe.tsx`, `lib/auctionSnipe.ts` — live auctions ending soonest, checked against PriceCharting
 - `app/api/cards/auctions/route.ts` — its endpoint
 - `lib/resaleProfit.ts` — estimated resale profit after eBay's real selling fee and shipping cost
