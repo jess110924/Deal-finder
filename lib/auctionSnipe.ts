@@ -120,15 +120,26 @@ async function evaluateAuction(auction: EbayAuctionListing, category: CardCatego
  * scan results. Price is always known (it's on the raw auction, not
  * something that requires a PriceCharting lookup), so this sort applies
  * cleanly whether or not a given auction was actually checked.
+ *
+ * `offset`, when given, shifts the whole eBay fetch forward by that many
+ * auctions — requested directly ("if I search and don't see anything, I
+ * can search again and get new results"). Without it, an unchanged query
+ * always fetches the identical soonest-ending `AUCTION_FETCH_LIMIT`
+ * auctions from eBay, so "0 profitable" on a repeat search could never
+ * change until an actual auction ended or a new one was listed. The
+ * caller (AuctionSnipe.tsx) increments this on a repeat search of the
+ * same query/filters, so pressing Search again explores further into the
+ * pool instead of re-fetching the same page.
  */
 export async function searchEndingAuctions(
   query: string,
   category: CardCategory,
   maxHoursRemaining?: number,
-  sortBy: "time" | "price" = "time"
+  sortBy: "time" | "price" = "time",
+  offset = 0
 ): Promise<AuctionSnipeResult[]> {
   const effectiveQuery = extractSerialDenominator(query) ? extractSearchKeywords(query) : query;
-  const rawAuctions = await searchAuctionListings(effectiveQuery, category, AUCTION_FETCH_LIMIT);
+  const rawAuctions = await searchAuctionListings(effectiveQuery, category, AUCTION_FETCH_LIMIT, offset);
 
   let auctions = rawAuctions.filter((a) => !isGraded(a.condition) && !isBundle(a.title) && a.currentBidCents > 0);
 

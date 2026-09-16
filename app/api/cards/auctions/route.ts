@@ -12,13 +12,16 @@ export async function GET(request: NextRequest) {
   const maxHoursParam = request.nextUrl.searchParams.get("maxHours");
   const maxHours = maxHoursParam ? Number(maxHoursParam) : undefined;
   const sortBy = request.nextUrl.searchParams.get("sortBy") === "price" ? "price" : "time";
+  const offsetParam = request.nextUrl.searchParams.get("offset");
+  const offset = offsetParam ? Number(offsetParam) : 0;
 
   try {
     const auctions = await searchEndingAuctions(
       query,
       category,
       Number.isFinite(maxHours) ? maxHours : undefined,
-      sortBy
+      sortBy,
+      Number.isFinite(offset) && offset > 0 ? offset : 0
     );
     return NextResponse.json({ auctions });
   } catch (err) {

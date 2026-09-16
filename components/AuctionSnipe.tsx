@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { CardCategory } from "@/lib/cardComparison";
 import type { AuctionSnipeResult } from "@/lib/auctionSnipe";
 
@@ -13,6 +13,15 @@ const HOURS_OPTIONS = [
   { label: "3 days", value: "72" },
   { label: "Any time", value: "" },
 ];
+
+// Matches AUCTION_FETCH_LIMIT in lib/auctionSnipe.ts — each repeat search
+// of the exact same query/filters shifts the eBay fetch forward by one
+// page instead of re-fetching the identical soonest-ending batch. Wraps
+// back to the start after 4 pages rather than growing forever — past
+// that, deeper pages are increasingly likely to just be empty or past
+// what's actually worth sniping.
+const AUCTION_PAGE_SIZE = 50;
+const MAX_OFFSET = AUCTION_PAGE_SIZE * 4;
 
 const SORT_OPTIONS = [
   { label: "Ending soonest", value: "time" },
@@ -38,10 +47,29 @@ export default function AuctionSnipe() {
   const [auctions, setAuctions] = useState<AuctionSnipeResult[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  // Not state — changing it shouldn't itself trigger a render, only the
+  // next handleSearch call needs to read it.
+  const lastSearchKeyRef = useRef<string | null>(null);
 
+  // Requested directly: "if I search and don't see anything, I can
+  // search again and get new results." Without this, an unchanged query
+  // always re-fetches the exact same soonest-ending batch from eBay, so
+  // "0 profitable" on a repeat click could never change on its own.
+  // Pressing Search again with the *same* query/category/window/sort
+  // moves to the next batch instead (wrapping back to the start after
+  // MAX_OFFSET); changing any of those counts as a new search and resets
+  // to the beginning, since paging forward on genuinely different
+  // criteria wouldn't make sense.
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
+
+    const searchKey = JSON.stringify({ q: query.trim(), category, maxHours, sortBy });
+    const nextOffset =
+      lastSearchKeyRef.current === searchKey ? (offset + AUCTION_PAGE_SIZE) % MAX_OFFSET : 0;
+    lastSearchKeyRef.current = searchKey;
+    setOffset(nextOffset);
 
     setLoading(true);
     setError(null);
@@ -49,6 +77,7 @@ export default function AuctionSnipe() {
     try {
       const params = new URLSearchParams({ q: query.trim(), category, sortBy });
       if (maxHours) params.set("maxHours", maxHours);
+      if (nextOffset > 0) params.set("offset", String(nextOffset));
       const res = await fetch(`/api/cards/auctions?${params}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
@@ -168,6 +197,12 @@ export default function AuctionSnipe() {
 
       {auctions && (
         <div className="flex flex-col gap-2">
+          {offset > 0 && (
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+              Showing a later batch of eBay&apos;s results (offset {offset}) — search again with the same
+              criteria for another, or change your search to start over.
+            </p>
+          )}
           {auctions.length > 0 && (
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
               {auctions.length} auction{auctions.length === 1 ? "" : "s"} found · {checked.length} checked against
@@ -176,13 +211,15 @@ export default function AuctionSnipe() {
           )}
           {auctions.length === 0 && (
             <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
-              No live auctions found in that window.
+              No live auctions found in that window — search again with the same criteria to check a
+              different batch of eBay&apos;s results.
             </p>
           )}
           {auctions.length > 0 && profitable.length === 0 && (
             <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
-              No profitable auctions in this window — {checked.length} checked,{" "}
-              {auctions.length - checked.length} not checked (past the 25-auction cap).
+              No profitable auctions in this batch — {checked.length} checked,{" "}
+              {auctions.length - checked.length} not checked (past the 25-auction cap). Search again with
+              the same criteria to check a different batch.
             </p>
           )}
           {profitable.map((auction) => (

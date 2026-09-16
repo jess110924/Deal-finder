@@ -144,13 +144,15 @@ function mapAuctionItemSummary(item: Record<string, unknown>): EbayAuctionListin
 export async function searchAuctionListings(
   query: string,
   category: CardCategory,
-  limit = 30
+  limit = 30,
+  offset = 0
 ): Promise<EbayAuctionListing[]> {
   const token = await getAccessToken();
 
   const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
   url.searchParams.set("q", query);
   url.searchParams.set("limit", String(limit));
+  if (offset > 0) url.searchParams.set("offset", String(offset));
   url.searchParams.set("category_ids", CATEGORY_ID_BY_CARD_CATEGORY[category]);
   url.searchParams.set("filter", "buyingOptions:{AUCTION}");
   url.searchParams.set("sort", "endingSoonest");

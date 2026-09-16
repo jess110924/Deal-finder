@@ -497,6 +497,26 @@ digits, and a year is always 4). Shared by every feature that calls
 `isBundle` (search, watchlist, Discover, Auction Sniper), not just this
 one.
 
+**Repeat searches now page forward instead of re-fetching the same
+batch**, requested directly: "if I search and don't see anything, I can
+search again and I get new results." Before this, an unchanged
+query/category/window/sort always hit eBay for the exact same
+soonest-ending `AUCTION_FETCH_LIMIT` auctions — "0 profitable" on a
+repeat click could never change until an actual auction closed or a new
+one got listed. `AuctionSnipe.tsx` now tracks the last-searched
+query/category/`maxHours`/`sortBy` as a key; pressing Search again with
+that *exact same* key sends `offset` (a new param threaded through
+`app/api/cards/auctions/route.ts` → `searchEndingAuctions` →
+`searchAuctionListings`, +50 each repeat, wrapping back to 0 after 4
+pages) so it explores further into eBay's results instead. Changing any
+search field counts as a new search and resets to the start — paging
+forward on genuinely different criteria wouldn't make sense. A small
+note ("Showing a later batch... offset 50") appears whenever `offset >
+0`, so it's not silently doing something the user can't see. Confirmed
+live: three repeat searches on the same query correctly requested
+offset 0, 50, then 100 in sequence, and changing the query reset back to
+offset 0.
+
 Didn't exist before the sold-comps period (this was requested and built
 during it), so there's no "old version" to revert to — it's adapted to
 compare against PriceCharting's reference price instead, the same way
