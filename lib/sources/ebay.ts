@@ -175,6 +175,7 @@ export type SearchListingsOptions = {
   minPriceDollars?: number;
   maxPriceDollars?: number;
   sort?: "bestMatch" | "price" | "-price" | "newlyListed";
+  offset?: number;
 };
 
 export async function searchListings(
@@ -182,12 +183,13 @@ export async function searchListings(
   category: CardCategory,
   options: SearchListingsOptions = {}
 ): Promise<EbayListing[]> {
-  const { limit = 30, minPriceDollars, maxPriceDollars, sort } = options;
+  const { limit = 30, minPriceDollars, maxPriceDollars, sort, offset = 0 } = options;
   const token = await getAccessToken();
 
   const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
   url.searchParams.set("q", query);
   url.searchParams.set("limit", String(limit));
+  if (offset > 0) url.searchParams.set("offset", String(offset));
   url.searchParams.set("category_ids", CATEGORY_ID_BY_CARD_CATEGORY[category]);
   if (sort && sort !== "bestMatch") url.searchParams.set("sort", sort);
 

@@ -334,9 +334,51 @@ scan for cards in a $30-$100 sweet spot, pick one, then check what
 similar listings of that exact card go for before buying. `PlayerSearch`
 (`components/PlayerSearch.tsx`, `lib/playerSearch.ts`,
 `app/api/cards/player-search` + `app/api/cards/peer-check`) does the
-first part as a plain price-banded eBay browse (no comparison figure — a
-player name isn't one product) and the second as an on-demand "Check
-similar listings" button per result.
+first part as a price-banded eBay browse and the second as an on-demand
+"Check similar listings" button per result.
+
+The first part originally had "no comparison figure — a player name
+isn't one product." That's still true of the *query* (there's no single
+PriceCharting reference for "Jalen Johnson"), but each *listing* now
+gets its own — requested directly, extending the profit filters built
+for Auction Sniper (see below) here too. Same "each listing gets its
+own comparison, never a shared one" rule as manual search and Auction
+Sniper (see evaluateListing's doc comment in lib/cardComparison.ts for
+why that matters), same `findCard`/`buildReferenceInfo`/
+`estimateResaleProfitDollars` machinery, and the same two adjustable
+filters:
+
+- **Min profit** (defaults to `$0`) — the dollar floor a listing's
+  estimated profit must clear to show at all.
+- **Show at least `N` profitable** (defaults to 25) — keeps fetching and
+  evaluating further eBay pages, starting from the current offset, until
+  `N` profitable listings are found, eBay's results run out, or
+  `MAX_PAGES_PER_SEARCH` (4) is hit. The response carries `pagesSearched`
+  and `reachedTarget` so the UI can say "found 4 of the 25 you asked for"
+  honestly rather than pad or hide a shortfall — confirmed live
+  searching "Victor Wembanyama" $30-$100: 153 listings found, 100
+  checked across all 4 pages, 4 genuinely profitable, `reachedTarget:
+  false` reported as such.
+
+Also gained the same "search again for new results" pagination as
+Auction Sniper: pressing Search again with the exact same query/price
+band/sort/filters advances `offset` by however many pages the last
+search consumed instead of re-fetching the identical batch; changing
+any field resets to the start. And a sort toggle — "Highest profit
+first" (the new default) or "Price: low to high" (the original order).
+This can take meaningfully longer than the original plain browse
+(confirmed live: ~25s checking up to 100 listings across 4 pages on a
+cold PriceCharting cache), so `app/api/cards/player-search/route.ts`
+sets `maxDuration = 60` same as Auction Sniper's route, and the UI shows
+the same "checking further pages... this can take longer" note while a
+multi-page search is in flight.
+
+"Check similar listings" itself is unchanged by any of this — it still
+compares against other currently-listed asking prices, never
+PriceCharting, per the original revert (see "A brief detour through
+sold comps, and back" above): it never used PriceCharting even before
+sold comps existed, and there was no reason to start now just because
+the listing *above* it gained its own PriceCharting check.
 
 Each result also has a star (☆/★) — requested directly ("save certain
 cards that I like so I can look at it later"). Starring POSTs a snapshot
