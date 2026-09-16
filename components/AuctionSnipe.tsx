@@ -15,13 +15,15 @@ const HOURS_OPTIONS = [
 ];
 
 // Matches AUCTION_FETCH_LIMIT in lib/auctionSnipe.ts — each repeat search
-// of the exact same query/filters shifts the eBay fetch forward by one
-// page instead of re-fetching the identical soonest-ending batch. Wraps
-// back to the start after 4 pages rather than growing forever — past
-// that, deeper pages are increasingly likely to just be empty or past
-// what's actually worth sniping.
+// of the exact same query/filters shifts the eBay fetch forward by
+// however many pages the last search actually consumed (see
+// lastPagesSearched below — a "min profitable" search can page through
+// several on its own), instead of re-fetching the identical batch(es).
+// Wraps back to the start after 8 pages rather than growing forever —
+// past that, deeper pages are increasingly likely to just be empty or
+// past what's actually worth sniping.
 const AUCTION_PAGE_SIZE = 50;
-const MAX_OFFSET = AUCTION_PAGE_SIZE * 4;
+const MAX_OFFSET = AUCTION_PAGE_SIZE * 8;
 
 const SORT_OPTIONS = [
   { label: "Ending soonest", value: "time" },
@@ -44,10 +46,23 @@ export default function AuctionSnipe() {
   const [query, setQuery] = useState("");
   const [maxHours, setMaxHours] = useState("24");
   const [sortBy, setSortBy] = useState<"time" | "price">("time");
+  // Requested directly ("adjust the profit dollar amount"): the minimum
+  // estimated profit an auction must clear to count as profitable —
+  // Auction Sniper's own filter, separate from manual search's fixed $5.
+  const [minProfit, setMinProfit] = useState("0");
+  // Requested directly ("show at least 25 profitable listings each
+  // search"): how many profitable auctions to keep paging for. Empty/0
+  // disables auto-paging — a single page, the original behavior.
+  const [minProfitable, setMinProfitable] = useState("25");
   const [auctions, setAuctions] = useState<AuctionSnipeResult[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
+  // How many eBay pages the most recent search actually consumed — a
+  // "min profitable" search can page through several on its own, so a
+  // repeat search needs to jump forward by that many, not just one.
+  const [lastPagesSearched, setLastPagesSearched] = useState(1);
+  const [reachedTarget, setReachedTarget] = useState(true);
   // Not state — changing it shouldn't itself trigger a render, only the
   // next handleSearch call needs to read it.
   const lastSearchKeyRef = useRef<string | null>(null);
@@ -130,18 +145,20 @@ export default function AuctionSnipe() {
   // search again and get new results." Without this, an unchanged query
   // always re-fetches the exact same soonest-ending batch from eBay, so
   // "0 profitable" on a repeat click could never change on its own.
-  // Pressing Search again with the *same* query/category/window/sort
-  // moves to the next batch instead (wrapping back to the start after
-  // MAX_OFFSET); changing any of those counts as a new search and resets
-  // to the beginning, since paging forward on genuinely different
-  // criteria wouldn't make sense.
+  // Pressing Search again with the *same* query/category/window/sort/
+  // filters moves forward by however many pages the last search actually
+  // consumed (`lastPagesSearched` — a "min profitable" search can use
+  // several on its own), wrapping back to the start after MAX_OFFSET;
+  // changing any search field counts as a new search and resets to the
+  // beginning, since paging forward on genuinely different criteria
+  // wouldn't make sense.
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
 
-    const searchKey = JSON.stringify({ q: query.trim(), category, maxHours, sortBy });
+    const searchKey = JSON.stringify({ q: query.trim(), category, maxHours, sortBy, minProfit, minProfitable });
     const nextOffset =
-      lastSearchKeyRef.current === searchKey ? (offset + AUCTION_PAGE_SIZE) % MAX_OFFSET : 0;
+      lastSearchKeyRef.current === searchKey ? (offset + lastPagesSearched * AUCTION_PAGE_SIZE) % MAX_OFFSET : 0;
     lastSearchKeyRef.current = searchKey;
     setOffset(nextOffset);
 
@@ -152,10 +169,20 @@ export default function AuctionSnipe() {
       const params = new URLSearchParams({ q: query.trim(), category, sortBy });
       if (maxHours) params.set("maxHours", maxHours);
       if (nextOffset > 0) params.set("offset", String(nextOffset));
+      const minProfitNum = Number(minProfit);
+      if (minProfit.trim() && Number.isFinite(minProfitNum) && minProfitNum >= 0) {
+        params.set("minProfit", String(minProfitNum));
+      }
+      const minProfitableNum = Number(minProfitable);
+      if (minProfitable.trim() && Number.isFinite(minProfitableNum) && minProfitableNum > 0) {
+        params.set("minProfitable", String(Math.floor(minProfitableNum)));
+      }
       const res = await fetch(`/api/cards/auctions?${params}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
       setAuctions(json.auctions ?? []);
+      setLastPagesSearched(json.pagesSearched ?? 1);
+      setReachedTarget(json.reachedTarget ?? true);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -180,13 +207,13 @@ export default function AuctionSnipe() {
         </h2>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
           Live auctions for a card, compared against PriceCharting&apos;s reference price. Only
-          auctions with any estimated profit if won at the current bid are shown — even a few cents,
-          a lower bar than manual search&apos;s $5 minimum, since sniping is about scanning everything
-          worth a second look, not just what clears a real flip&apos;s effort. The current bid is{" "}
-          <strong>not the final price</strong> — an auction with time left or existing bids can still
-          climb well past it. This is most useful for auctions ending very soon with few or no bids
-          yet, the ones nobody&apos;s found. Star (★) one to save it to Favorites, further down the
-          page.
+          auctions meeting &quot;Min profit&quot; (as low as a few cents) are shown, and if
+          &quot;Show at least&quot; is set, the search keeps checking further pages of eBay&apos;s
+          results until it finds that many profitable ones — up to a point, since a niche card may
+          never have that many. The current bid is <strong>not the final price</strong> — an auction
+          with time left or existing bids can still climb well past it. This is most useful for
+          auctions ending very soon with few or no bids yet, the ones nobody&apos;s found. Star (★)
+          one to save it to Favorites, further down the page.
         </p>
       </div>
 
@@ -254,6 +281,38 @@ export default function AuctionSnipe() {
             </option>
           ))}
         </select>
+        <div className="flex items-center gap-1">
+          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+            Min profit $
+          </span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={minProfit}
+            onChange={(e) => setMinProfit(e.target.value)}
+            className="w-20 rounded-md px-2 py-2 text-sm"
+            style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+            Show at least
+          </span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={minProfitable}
+            onChange={(e) => setMinProfitable(e.target.value)}
+            placeholder="1 page"
+            className="w-16 rounded-md px-2 py-2 text-sm"
+            style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
+          />
+          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+            profitable
+          </span>
+        </div>
         <button
           type="submit"
           disabled={loading}
@@ -263,6 +322,13 @@ export default function AuctionSnipe() {
           {loading ? "Searching…" : "Search"}
         </button>
       </form>
+
+      {loading && minProfitable.trim() && Number(minProfitable) > 0 && (
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+          Checking further pages of eBay&apos;s results to find {minProfitable} profitable auctions —
+          this can take longer than a single-page search.
+        </p>
+      )}
 
       {error && (
         <div className="rounded-md px-3 py-2 text-sm" style={{ color: "var(--critical)" }}>
@@ -287,7 +353,14 @@ export default function AuctionSnipe() {
           {auctions.length > 0 && (
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
               {auctions.length} auction{auctions.length === 1 ? "" : "s"} found · {checked.length} checked against
-              PriceCharting · {profitable.length} profitable.
+              PriceCharting · {profitable.length} profitable
+              {lastPagesSearched > 1 && ` (searched ${lastPagesSearched} pages of eBay's results)`}.
+              {!reachedTarget && minProfitable.trim() && (
+                <>
+                  {" "}Fewer than the {minProfitable} you asked for — that may be all there are right
+                  now for this search.
+                </>
+              )}
             </p>
           )}
           {auctions.length === 0 && (
@@ -298,9 +371,10 @@ export default function AuctionSnipe() {
           )}
           {auctions.length > 0 && profitable.length === 0 && (
             <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
-              No profitable auctions in this batch — {checked.length} checked,{" "}
-              {auctions.length - checked.length} not checked (past the 25-auction cap). Search again with
-              the same criteria to check a different batch.
+              No profitable auctions found — {checked.length} checked across {lastPagesSearched} page
+              {lastPagesSearched === 1 ? "" : "s"} of eBay&apos;s results,{" "}
+              {auctions.length - checked.length} not checked (past the per-page 25-auction cap). Search
+              again with the same criteria to check further pages.
             </p>
           )}
           {profitable.map((auction) => (

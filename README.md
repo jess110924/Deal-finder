@@ -467,15 +467,17 @@ listings" report:
   auctions found · M checked against PriceCharting · K profitable")
   makes "0 shown" legible the same way: it's the difference between
   "checked 25, none profitable" and "found 40, only checked 25."
-- **Its own, much lower profit bar** — `MIN_AUCTION_PROFIT_DOLLARS = 0`
-  (strictly greater than zero, not manual search's $5
-  `MIN_WORTHWHILE_PROFIT_DOLLARS`), requested directly: "make sure the
-  listings that do show up are profitable even if it's a penny."
-  Confirmed live this was the actual cause of "I'm not getting any
-  listings" — a real search returned several auctions sitting at
-  $0.25-$0.80 profit that the shared $5 floor was filtering out
-  entirely. Sniping is a faster scan of what's worth a second look, not
-  manual search's "worth the effort of a real flip" bar.
+- **Its own, much lower default profit bar** —
+  `DEFAULT_MIN_AUCTION_PROFIT_DOLLARS = 0` (strictly greater than zero,
+  not manual search's $5 `MIN_WORTHWHILE_PROFIT_DOLLARS`), requested
+  directly: "make sure the listings that do show up are profitable even
+  if it's a penny." Confirmed live this was the actual cause of "I'm not
+  getting any listings" — a real search returned several auctions
+  sitting at $0.25-$0.80 profit that the shared $5 floor was filtering
+  out entirely. Sniping is a faster scan of what's worth a second look,
+  not manual search's "worth the effort of a real flip" bar. Now an
+  adjustable filter too (see "Min profit" below), not just a fixed
+  default.
 - **The evaluation cap and fetch limit both went up** (12→25 evaluated,
   30→50 fetched) — confirmed live a "within the day" search was only
   checking 12 of the 20-25 auctions eBay actually returned, missing real
@@ -504,18 +506,51 @@ query/category/window/sort always hit eBay for the exact same
 soonest-ending `AUCTION_FETCH_LIMIT` auctions — "0 profitable" on a
 repeat click could never change until an actual auction closed or a new
 one got listed. `AuctionSnipe.tsx` now tracks the last-searched
-query/category/`maxHours`/`sortBy` as a key; pressing Search again with
-that *exact same* key sends `offset` (a new param threaded through
+query/category/window/sort/filters as a key; pressing Search again with
+that *exact same* key sends `offset` (a param threaded through
 `app/api/cards/auctions/route.ts` → `searchEndingAuctions` →
-`searchAuctionListings`, +50 each repeat, wrapping back to 0 after 4
-pages) so it explores further into eBay's results instead. Changing any
-search field counts as a new search and resets to the start — paging
-forward on genuinely different criteria wouldn't make sense. A small
-note ("Showing a later batch... offset 50") appears whenever `offset >
-0`, so it's not silently doing something the user can't see. Confirmed
-live: three repeat searches on the same query correctly requested
-offset 0, 50, then 100 in sequence, and changing the query reset back to
-offset 0.
+`searchAuctionListings`) forward by however many pages the *last* search
+actually consumed (`lastPagesSearched` — see the target-count filter
+below, since a single click can now use more than one page on its own),
+wrapping back to 0 after 8 pages, so it explores further into eBay's
+results instead. Changing any search field counts as a new search and
+resets to the start — paging forward on genuinely different criteria
+wouldn't make sense. A small note ("Showing a later batch... offset 50")
+appears whenever `offset > 0`, so it's not silently doing something the
+user can't see. Confirmed live: three repeat searches on the same query
+correctly requested offset 0, 50, then 100 in sequence, and changing the
+query reset back to offset 0.
+
+**Two adjustable filters**, requested directly: "adjust the profit
+dollar amount" and "show at least 25 profitable listings each search."
+Both live in `AuctionSearchOptions` (`lib/auctionSnipe.ts`):
+
+- **Min profit** replaces the fixed `DEFAULT_MIN_AUCTION_PROFIT_DOLLARS`
+  with whatever the user sets (defaults to `0`, same as before) —
+  `evaluateAuction`'s `isProfitable` check now takes this as a parameter
+  instead of a hardcoded constant.
+- **Show at least `N` profitable** (defaults to 25) makes
+  `searchEndingAuctions` keep fetching and evaluating further eBay pages
+  — starting at `offset`, advancing by `AUCTION_FETCH_LIMIT` each time —
+  until either `N` profitable auctions have been found, eBay returns
+  fewer than a full page (nothing left to page through), or
+  `MAX_PAGES_PER_SEARCH` (4) is hit, whichever comes first. The response
+  carries `pagesSearched` and `reachedTarget` so the UI can say "found 18
+  of the 25 you asked for" honestly rather than silently returning fewer
+  than requested — confirmed live with a `minProfit=10` search that
+  genuinely only had 1 auction clearing that bar: `reachedTarget: false`
+  after searching all 4 pages, reported as such rather than padded or
+  hidden.
+
+  This can take meaningfully longer than a single-page search (confirmed
+  live: ~28s cold, checking up to 100 auctions against PriceCharting
+  across 4 pages; a warm PriceCharting cache — see `pcFetch`'s 1-hour
+  `revalidate` — brings repeat searches on the same query down to a few
+  seconds), so `app/api/cards/auctions/route.ts` sets `maxDuration = 60`
+  (same reason and same value as check-watchlist/Discover — see their
+  route files) and the UI shows a "checking further pages... this can
+  take longer" note while `minProfitable` is active and a search is in
+  flight.
 
 **Each auction also has a star (☆/★)**, requested directly ("add stars
 to the auctions I find so I can add to my save list") — the same

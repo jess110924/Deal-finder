@@ -32,29 +32,84 @@ export type AuctionSnipeResult = EbayAuctionListing & {
 
 // Fetches more than eBay's/searchAuctionListings' 30-item default and
 // evaluates more than manual search's SEARCH_MAX_LISTINGS_TO_EVALUATE (12)
-// — requested directly after a "within the day" search only checked 12
-// of the 20-25 auctions actually returned, missing real profitable ones
-// sitting just past the cap. PriceCharting isn't billed per-request the
-// way sold comps was (see "A brief detour through sold comps, and back"
-// in the README), so there's no cost reason to keep this as tight as the
-// sold-comps era did; their docs mention a 1-request/second limit and
-// concurrency 12 hasn't shown rate-limiting in testing at this volume.
+// per page — requested directly after a "within the day" search only
+// checked 12 of the 20-25 auctions actually returned, missing real
+// profitable ones sitting just past the cap. PriceCharting isn't billed
+// per-request the way sold comps was (see "A brief detour through sold
+// comps, and back" in the README), so there's no cost reason to keep
+// this as tight as the sold-comps era did; their docs mention a
+// 1-request/second limit and concurrency 12 hasn't shown rate-limiting
+// in testing at this volume.
 const AUCTION_FETCH_LIMIT = 50;
 const AUCTION_MAX_LISTINGS_TO_EVALUATE = 25;
 const LOOKUP_CONCURRENCY = 12;
 
-// Auction Sniper's own, much lower bar than manual search's
-// MIN_WORTHWHILE_PROFIT_DOLLARS ($5) — requested directly ("make sure
-// the listings that do show up are profitable even if it's a penny").
-// Manual search's $5 floor exists because a real flip costs real effort
-// or it's not worth the API-comparable "browse and decide" flow; sniping
-// is a different use case — a fast scan of what's ending soon that's
-// merely worth a second look, where a $0.25 edge on a $1 bid is still
-// useful signal even if it wouldn't clear manual search's bar. Strictly
-// greater than zero, not "not a loss" — breakeven isn't a profit.
-const MIN_AUCTION_PROFIT_DOLLARS = 0;
+// Auction Sniper's own, adjustable, much lower default bar than manual
+// search's MIN_WORTHWHILE_PROFIT_DOLLARS ($5) — requested directly
+// ("make sure the listings that do show up are profitable even if it's
+// a penny", later made an adjustable filter). Manual search's $5 floor
+// exists because a real flip costs real effort or it's not worth the
+// "browse and decide" flow; sniping defaults to a lower bar since it's a
+// faster scan of what's worth a second look — but the user can raise it
+// back up if pennies aren't worth their time.
+export const DEFAULT_MIN_AUCTION_PROFIT_DOLLARS = 0;
 
-async function evaluateAuction(auction: EbayAuctionListing, category: CardCategory): Promise<AuctionSnipeResult> {
+// When a caller asks for a minimum number of profitable results
+// (`minProfitableTarget`), this bounds how many additional eBay pages
+// get fetched chasing that target — without a cap, a high target on a
+// niche card (which may not have anywhere near that many profitable
+// auctions, ever) would keep paging until eBay's results ran out,
+// risking Vercel's request timeout. Each page can cost up to
+// AUCTION_MAX_LISTINGS_TO_EVALUATE PriceCharting lookups, so this bounds
+// total lookups per search to roughly 4x that.
+const MAX_PAGES_PER_SEARCH = 4;
+
+export type AuctionSearchOptions = {
+  maxHoursRemaining?: number;
+  // "time" (default) is soonest-ending first — "what do I need to watch
+  // in the next hour." "price" is current bid lowest-to-highest,
+  // requested directly as a second way to scan results. Only reorders
+  // the final returned list; doesn't change which auctions get
+  // evaluated (see below).
+  sortBy?: "time" | "price";
+  // Shifts the starting eBay fetch forward by this many auctions —
+  // requested directly ("if I search and don't see anything, I can
+  // search again and get new results"). See searchEndingAuctions' doc
+  // comment.
+  offset?: number;
+  // Requested directly, made adjustable after starting at a fixed
+  // "any profit counts" bar: the actual dollar floor an auction's
+  // estimated profit must clear to count as `isProfitable`.
+  minProfitDollars?: number;
+  // Requested directly ("show at least 25 profitable listings each
+  // search"): keeps fetching and evaluating additional eBay pages,
+  // starting from `offset`, until at least this many profitable auctions
+  // have been found or MAX_PAGES_PER_SEARCH is reached — whichever comes
+  // first. Omit (or 0) to fetch and evaluate a single page, the original
+  // behavior.
+  minProfitableTarget?: number;
+};
+
+export type AuctionSearchResult = {
+  auctions: AuctionSnipeResult[];
+  // How many eBay pages (of AUCTION_FETCH_LIMIT each) actually got
+  // fetched — 1 unless minProfitableTarget pushed it further. The caller
+  // needs this to compute where a genuinely-fresh repeat search should
+  // start from (offset + pagesSearched * AUCTION_FETCH_LIMIT), since it
+  // may have consumed more than one page's worth of offset already.
+  pagesSearched: number;
+  // False when minProfitableTarget was set but MAX_PAGES_PER_SEARCH (or
+  // eBay simply running out of matching auctions) was hit first — lets
+  // the UI say "found 18 of the 25 you asked for" honestly instead of
+  // silently returning fewer than requested.
+  reachedTarget: boolean;
+};
+
+async function evaluateAuction(
+  auction: EbayAuctionListing,
+  category: CardCategory,
+  minProfitDollars: number
+): Promise<AuctionSnipeResult> {
   const currentBidDollars = auction.currentBidCents / 100;
   const minutesRemaining = Math.round((new Date(auction.endsAt).getTime() - Date.now()) / 60_000);
 
@@ -83,7 +138,7 @@ async function evaluateAuction(auction: EbayAuctionListing, category: CardCatego
     auction.shippingCents / 100,
     referenceInfo.ungradedPriceDollars
   );
-  const isProfitable = estimatedProfitDollars > MIN_AUCTION_PROFIT_DOLLARS;
+  const isProfitable = estimatedProfitDollars > minProfitDollars;
 
   return {
     ...auction,
@@ -96,50 +151,16 @@ async function evaluateAuction(auction: EbayAuctionListing, category: CardCatego
   };
 }
 
-/**
- * Live auctions for a card, each checked against its own best-matching
- * PriceCharting product — same "each listing gets its own comparison"
- * rule as manual search, for the same reason (see evaluateListing in
- * lib/cardComparison.ts). `maxHoursRemaining`, when given, drops anything
- * ending further out than that — sniping is about acting in a specific
- * window, not browsing every auction that exists for a card. Fractional
- * values work (0.5 = 30 minutes), so the window can go tighter than an
- * hour.
- *
- * Capped to the soonest-ending `AUCTION_MAX_LISTINGS_TO_EVALUATE` for the
- * PriceCharting lookup regardless of `sortBy` below — those are the
- * actual snipe candidates worth spending a lookup on even if the final
- * list is displayed sorted by price. The rest are still returned (title,
- * bid, time left, link), just without their own reference/profit
- * estimate.
- *
- * `sortBy` controls the order of the final, returned list only (not which
- * auctions get evaluated, above): "time" (default) is soonest-ending
- * first — "what do I need to watch in the next hour" — `"price"` is
- * current bid lowest-to-highest, requested directly as a second way to
- * scan results. Price is always known (it's on the raw auction, not
- * something that requires a PriceCharting lookup), so this sort applies
- * cleanly whether or not a given auction was actually checked.
- *
- * `offset`, when given, shifts the whole eBay fetch forward by that many
- * auctions — requested directly ("if I search and don't see anything, I
- * can search again and get new results"). Without it, an unchanged query
- * always fetches the identical soonest-ending `AUCTION_FETCH_LIMIT`
- * auctions from eBay, so "0 profitable" on a repeat search could never
- * change until an actual auction ended or a new one was listed. The
- * caller (AuctionSnipe.tsx) increments this on a repeat search of the
- * same query/filters, so pressing Search again explores further into the
- * pool instead of re-fetching the same page.
- */
-export async function searchEndingAuctions(
+/** One eBay fetch + filter + PriceCharting-evaluate pass at a given offset. */
+async function fetchAndEvaluatePage(
   query: string,
   category: CardCategory,
-  maxHoursRemaining?: number,
-  sortBy: "time" | "price" = "time",
-  offset = 0
-): Promise<AuctionSnipeResult[]> {
+  maxHoursRemaining: number | undefined,
+  minProfitDollars: number,
+  pageOffset: number
+): Promise<{ results: AuctionSnipeResult[]; rawCount: number }> {
   const effectiveQuery = extractSerialDenominator(query) ? extractSearchKeywords(query) : query;
-  const rawAuctions = await searchAuctionListings(effectiveQuery, category, AUCTION_FETCH_LIMIT, offset);
+  const rawAuctions = await searchAuctionListings(effectiveQuery, category, AUCTION_FETCH_LIMIT, pageOffset);
 
   let auctions = rawAuctions.filter((a) => !isGraded(a.condition) && !isBundle(a.title) && a.currentBidCents > 0);
 
@@ -160,7 +181,9 @@ export async function searchEndingAuctions(
   const toEvaluate = auctions.slice(0, AUCTION_MAX_LISTINGS_TO_EVALUATE);
   const toSkip = auctions.slice(AUCTION_MAX_LISTINGS_TO_EVALUATE);
 
-  const evaluated = await mapWithConcurrency(toEvaluate, LOOKUP_CONCURRENCY, (a) => evaluateAuction(a, category));
+  const evaluated = await mapWithConcurrency(toEvaluate, LOOKUP_CONCURRENCY, (a) =>
+    evaluateAuction(a, category, minProfitDollars)
+  );
   const skipped: AuctionSnipeResult[] = toSkip.map((a) => ({
     ...a,
     currentBidDollars: a.currentBidCents / 100,
@@ -171,8 +194,63 @@ export async function searchEndingAuctions(
     wasChecked: false,
   }));
 
-  const combined = [...evaluated, ...skipped];
-  return sortBy === "price"
-    ? combined.sort((a, b) => a.currentBidDollars - b.currentBidDollars)
-    : combined.sort((a, b) => a.minutesRemaining - b.minutesRemaining);
+  return { results: [...evaluated, ...skipped], rawCount: rawAuctions.length };
+}
+
+/**
+ * Live auctions for a card, each checked against its own best-matching
+ * PriceCharting product — same "each listing gets its own comparison"
+ * rule as manual search, for the same reason (see evaluateListing in
+ * lib/cardComparison.ts).
+ *
+ * Without `minProfitableTarget`, this fetches and evaluates exactly one
+ * page (`pagesSearched: 1`) — the original behavior. With it set, pages
+ * are fetched starting from `offset` and moving forward
+ * (`+AUCTION_FETCH_LIMIT` each time) until either that many profitable
+ * auctions have been found, `MAX_PAGES_PER_SEARCH` is hit, or eBay
+ * returns fewer than a full page (nothing left to page through) —
+ * requested directly ("show at least 25 profitable listings each
+ * search"). `reachedTarget` in the result tells the caller which of
+ * those it stopped for, so the UI can say "found 18 of 25" honestly
+ * rather than imply success either way.
+ */
+export async function searchEndingAuctions(
+  query: string,
+  category: CardCategory,
+  options: AuctionSearchOptions = {}
+): Promise<AuctionSearchResult> {
+  const {
+    maxHoursRemaining,
+    sortBy = "time",
+    offset = 0,
+    minProfitDollars = DEFAULT_MIN_AUCTION_PROFIT_DOLLARS,
+    minProfitableTarget,
+  } = options;
+
+  const allResults: AuctionSnipeResult[] = [];
+  let pagesSearched = 0;
+  let currentOffset = offset;
+
+  do {
+    const page = await fetchAndEvaluatePage(query, category, maxHoursRemaining, minProfitDollars, currentOffset);
+    pagesSearched++;
+    allResults.push(...page.results);
+
+    const profitableSoFar = allResults.filter((a) => a.isProfitable).length;
+    const targetReached = !minProfitableTarget || profitableSoFar >= minProfitableTarget;
+    const exhausted = page.rawCount < AUCTION_FETCH_LIMIT;
+
+    if (targetReached || exhausted || pagesSearched >= MAX_PAGES_PER_SEARCH) break;
+    currentOffset += AUCTION_FETCH_LIMIT;
+  } while (true);
+
+  const profitableTotal = allResults.filter((a) => a.isProfitable).length;
+  const reachedTarget = !minProfitableTarget || profitableTotal >= minProfitableTarget;
+
+  const auctions =
+    sortBy === "price"
+      ? [...allResults].sort((a, b) => a.currentBidDollars - b.currentBidDollars)
+      : [...allResults].sort((a, b) => a.minutesRemaining - b.minutesRemaining);
+
+  return { auctions, pagesSearched, reachedTarget };
 }
