@@ -251,25 +251,40 @@ export async function removeMismatch(itemId: string): Promise<void> {
   );
 }
 
-// A starred listing from Player Search, kept to look at later — separate
-// from the watchlist/finds flow above (that one's a name-driven,
-// automatically-rechecked queue; this is "I saw this specific listing and
-// want to remember it," no rechecking involved). Snapshotted at the time
-// you star it, same reasoning as SavedFind: the price/listing shown later
-// is whatever it was when you favorited it, not a live re-fetch.
+// A starred listing from Player Search or Auction Sniper, kept to look at
+// later — separate from the watchlist/finds flow above (that one's a
+// name-driven, automatically-rechecked queue; this is "I saw this
+// specific listing and want to remember it," no rechecking involved).
+// Snapshotted at the time you star it, same reasoning as SavedFind: the
+// price/listing shown later is whatever it was when you favorited it,
+// not a live re-fetch.
 export type FavoriteCard = {
   itemId: string;
   title: string;
+  // For an auction, the current bid at the moment it was starred — not
+  // the eventual winning price. See `source` below.
   priceDollars: number;
   itemWebUrl: string;
   imageUrl: string | null;
   condition: string | null;
   category: CardCategory;
   // The player/search term this listing was found under — Player
-  // Search's own query box, so a later look back at favorites still shows
-  // what you were searching for when you starred it.
+  // Search's or Auction Sniper's own query box, so a later look back at
+  // favorites still shows what you were searching for when you starred it.
   searchedFor: string;
   favoritedAt: string;
+  // Which feature this was starred from. Optional/absent on favorites
+  // saved before Auction Sniper got its own star button — treat missing
+  // as "player-search", the only source that existed then.
+  source?: "player-search" | "auction";
+  // Auction-only snapshot fields, all optional since a Player Search
+  // favorite never has them.
+  bidCount?: number;
+  // ISO datetime the auction was scheduled to close at the time it was
+  // starred — a snapshot, not live; the auction may have already ended.
+  endsAt?: string;
+  estimatedProfitDollars?: number;
+  reference?: ReferenceInfo;
 };
 
 export async function getFavorites(): Promise<FavoriteCard[]> {

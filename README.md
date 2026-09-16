@@ -344,14 +344,14 @@ of that listing (title, price, photo, condition, category, and the
 player you searched for) to Redis via `lib/db.ts`'s `addFavorite`/
 `getFavorites`/`removeFavorite` and `app/api/cards/favorites/route.ts`;
 `components/CardFavorites.tsx` renders the saved list further down the
-page. It's a separate, simpler flow from the watchlist above: no
-rechecking, no reference price, no profit math — just "I saw this and
-want to find it again," so what's shown later is exactly the snapshot
-from when you starred it, not a live re-fetch (the listing may have
-sold or changed price since). The star toggle is optimistic with
-rollback on failure, same pattern as the watchlist actions below, so a
-failed save (e.g. Redis not configured) doesn't leave a star looking
-saved when it isn't.
+page (Auction Sniper's own star button, added later, feeds the same
+list — see below). It's a separate, simpler flow from the watchlist
+above: no rechecking, no live re-fetch — what's shown later is exactly
+the snapshot from when you starred it (the listing may have sold or
+changed price since). The star toggle is optimistic with rollback on
+failure, same pattern as the watchlist actions below, so a failed save
+(e.g. Redis not configured) doesn't leave a star looking saved when it
+isn't.
 
 #### The sold-comps era, briefly (historical)
 
@@ -516,6 +516,23 @@ note ("Showing a later batch... offset 50") appears whenever `offset >
 live: three repeat searches on the same query correctly requested
 offset 0, 50, then 100 in sequence, and changing the query reset back to
 offset 0.
+
+**Each auction also has a star (☆/★)**, requested directly ("add stars
+to the auctions I find so I can add to my save list") — the same
+`FavoriteCard`/`app/api/cards/favorites` mechanism Player Search's star
+button uses (see above), just with an auction's own snapshot fields
+instead of a plain listing's: `bidCount`, `endsAt`, and, when the
+auction was checked, `estimatedProfitDollars` and `reference`. All of
+these were added to `FavoriteCard` as optional fields (`source?:
+"player-search" | "auction"` distinguishes which star button a favorite
+came from; a favorite saved before Auction Sniper had one is treated as
+`"player-search"`). `CardFavorites.tsx` shows the extra fields only when
+present — a bid count and "if won at that bid" profit line for
+auction-sourced favorites, nothing extra for Player Search ones. Placed
+as an overlay button on the auction's photo (`position: absolute`, a
+semi-transparent circle) rather than inline with the title/price row
+Player Search uses, since Auction Sniper's card layout doesn't have a
+side-by-side photo+details row to put it in.
 
 Didn't exist before the sold-comps period (this was requested and built
 during it), so there's no "old version" to revert to — it's adapted to
@@ -967,7 +984,7 @@ site is wide open without it.
 - `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the Discover run (schedule currently disabled)
 - `components/PlayerSearch.tsx`, `lib/playerSearch.ts` — price-banded player browse + peer-listing check
 - `app/api/cards/player-search/route.ts`, `app/api/cards/peer-check/route.ts` — their endpoints
-- `components/CardFavorites.tsx`, `app/api/cards/favorites/route.ts` — Player Search's star/favorite list
+- `components/CardFavorites.tsx`, `app/api/cards/favorites/route.ts` — the shared star/favorite list (Player Search and Auction Sniper both feed it)
 - `components/AuctionSnipe.tsx`, `lib/auctionSnipe.ts` — live auctions ending soonest, checked against PriceCharting
 - `app/api/cards/auctions/route.ts` — its endpoint
 - `lib/resaleProfit.ts` — estimated resale profit after eBay's real selling fee and shipping cost

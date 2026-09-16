@@ -11,9 +11,9 @@ export default function CardsPage() {
       <hr style={{ borderColor: "var(--border-hairline)" }} />
       <PlayerSearch />
       <hr style={{ borderColor: "var(--border-hairline)" }} />
-      <CardFavorites />
-      <hr style={{ borderColor: "var(--border-hairline)" }} />
       <AuctionSnipe />
+      <hr style={{ borderColor: "var(--border-hairline)" }} />
+      <CardFavorites />
       <hr style={{ borderColor: "var(--border-hairline)" }} />
       <CardWatchlist />
     </div>

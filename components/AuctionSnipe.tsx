@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CardCategory } from "@/lib/cardComparison";
 import type { AuctionSnipeResult } from "@/lib/auctionSnipe";
 
@@ -51,6 +51,80 @@ export default function AuctionSnipe() {
   // Not state — changing it shouldn't itself trigger a render, only the
   // next handleSearch call needs to read it.
   const lastSearchKeyRef = useRef<string | null>(null);
+  const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
+  const [favoritingIds, setFavoritingIds] = useState<Set<string>>(new Set());
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/cards/favorites")
+      .then((res) => res.json())
+      .then((json) => setFavoritedIds(new Set((json.favorites ?? []).map((f: { itemId: string }) => f.itemId))))
+      .catch(() => {});
+  }, []);
+
+  // Requested directly ("add stars to the auctions I find so I can add
+  // to my save list") — same star/favorite mechanism as Player Search
+  // (components/PlayerSearch.tsx), just with an auction's own snapshot
+  // fields (bid count, end time, profit estimate, reference) instead of
+  // a plain listing's. Optimistic with rollback on failure, same reason
+  // as Player Search's version: a failed save (e.g. Redis not
+  // configured) shouldn't leave the star showing saved when it isn't.
+  async function toggleFavorite(auction: AuctionSnipeResult) {
+    const isFavorited = favoritedIds.has(auction.itemId);
+    setFavoritingIds((prev) => new Set(prev).add(auction.itemId));
+    setFavoriteError(null);
+    setFavoritedIds((prev) => {
+      const next = new Set(prev);
+      if (isFavorited) next.delete(auction.itemId);
+      else next.add(auction.itemId);
+      return next;
+    });
+    try {
+      const res = isFavorited
+        ? await fetch("/api/cards/favorites", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ itemId: auction.itemId }),
+          })
+        : await fetch("/api/cards/favorites", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              itemId: auction.itemId,
+              title: auction.title,
+              priceDollars: auction.currentBidDollars,
+              itemWebUrl: auction.itemWebUrl,
+              imageUrl: auction.imageUrl,
+              condition: auction.condition,
+              category,
+              searchedFor: query.trim(),
+              source: "auction",
+              bidCount: auction.bidCount,
+              endsAt: auction.endsAt,
+              estimatedProfitDollars: auction.estimatedProfitDollars ?? undefined,
+              reference: auction.reference ?? undefined,
+            }),
+          });
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error || `Request failed: ${res.status}`);
+      }
+    } catch (err) {
+      setFavoritedIds((prev) => {
+        const next = new Set(prev);
+        if (isFavorited) next.add(auction.itemId);
+        else next.delete(auction.itemId);
+        return next;
+      });
+      setFavoriteError((err as Error).message);
+    } finally {
+      setFavoritingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(auction.itemId);
+        return next;
+      });
+    }
+  }
 
   // Requested directly: "if I search and don't see anything, I can
   // search again and get new results." Without this, an unchanged query
@@ -111,7 +185,8 @@ export default function AuctionSnipe() {
           worth a second look, not just what clears a real flip&apos;s effort. The current bid is{" "}
           <strong>not the final price</strong> — an auction with time left or existing bids can still
           climb well past it. This is most useful for auctions ending very soon with few or no bids
-          yet, the ones nobody&apos;s found.
+          yet, the ones nobody&apos;s found. Star (★) one to save it to Favorites, further down the
+          page.
         </p>
       </div>
 
@@ -195,6 +270,12 @@ export default function AuctionSnipe() {
         </div>
       )}
 
+      {favoriteError && (
+        <div className="rounded-md px-3 py-2 text-sm" style={{ color: "var(--critical)" }}>
+          Couldn&apos;t save favorite: {favoriteError}
+        </div>
+      )}
+
       {auctions && (
         <div className="flex flex-col gap-2">
           {offset > 0 && (
@@ -228,19 +309,33 @@ export default function AuctionSnipe() {
               className="rounded-lg overflow-hidden flex flex-col"
               style={{ background: "var(--surface-1)", border: "1px solid var(--border-hairline)" }}
             >
-              <a href={auction.itemWebUrl} target="_blank" rel="noopener noreferrer" className="block">
-                {auction.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={auction.imageUrl} alt="" className="w-full aspect-square object-contain" style={{ background: "#fff" }} />
-                ) : (
-                  <div
-                    className="w-full aspect-square flex items-center justify-center text-sm"
-                    style={{ background: "#fff", color: "var(--text-muted)" }}
-                  >
-                    No photo
-                  </div>
-                )}
-              </a>
+              <div className="relative">
+                <a href={auction.itemWebUrl} target="_blank" rel="noopener noreferrer" className="block">
+                  {auction.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={auction.imageUrl} alt="" className="w-full aspect-square object-contain" style={{ background: "#fff" }} />
+                  ) : (
+                    <div
+                      className="w-full aspect-square flex items-center justify-center text-sm"
+                      style={{ background: "#fff", color: "var(--text-muted)" }}
+                    >
+                      No photo
+                    </div>
+                  )}
+                </a>
+                <button
+                  onClick={() => toggleFavorite(auction)}
+                  disabled={favoritingIds.has(auction.itemId)}
+                  aria-label={favoritedIds.has(auction.itemId) ? "Remove from favorites" : "Save to favorites"}
+                  className="absolute top-2 left-2 w-7 h-7 flex items-center justify-center text-lg leading-none rounded-full"
+                  style={{
+                    background: "rgba(0,0,0,0.55)",
+                    color: favoritedIds.has(auction.itemId) ? "var(--series-1)" : "#fff",
+                  }}
+                >
+                  {favoritedIds.has(auction.itemId) ? "★" : "☆"}
+                </button>
+              </div>
               <div className="p-3">
                 <a
                   href={auction.itemWebUrl}

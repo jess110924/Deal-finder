@@ -5,6 +5,10 @@ import type { FavoriteCard } from "@/lib/db";
 import type { CardCategory } from "@/lib/cardComparison";
 
 const CATEGORY_LABEL: Record<CardCategory, string> = { sports: "Sports", pokemon: "Pokémon" };
+const SOURCE_LABEL: Record<NonNullable<FavoriteCard["source"]>, string> = {
+  "player-search": "Player Search",
+  auction: "Auction Sniper",
+};
 
 export default function CardFavorites() {
   const [favorites, setFavorites] = useState<FavoriteCard[]>([]);
@@ -49,8 +53,9 @@ export default function CardFavorites() {
           Favorites {favorites.length > 0 && `(${favorites.length})`}
         </h2>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Listings you&apos;ve starred from Player Search, saved as a snapshot of when you starred them — the price
-          and listing may have changed or sold since. Click through to eBay to check the current status.
+          Listings you&apos;ve starred from Player Search or Auction Sniper, saved as a snapshot of when
+          you starred them — the price, bid, or listing may have changed, ended, or sold since. Click
+          through to eBay to check the current status.
         </p>
       </div>
 
@@ -62,7 +67,8 @@ export default function CardFavorites() {
 
       {!loading && favorites.length === 0 && (
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          Nothing starred yet — use the ☆ button on a listing in Player Search above.
+          Nothing starred yet — use the ☆ button on a listing in Player Search or an auction in Auction
+          Sniper above.
         </p>
       )}
 
@@ -97,13 +103,35 @@ export default function CardFavorites() {
                 {fav.title}
               </a>
               <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                {CATEGORY_LABEL[fav.category]} · Searched: {fav.searchedFor || "—"}
+                {SOURCE_LABEL[fav.source ?? "player-search"]} · {CATEGORY_LABEL[fav.category]} · Searched:{" "}
+                {fav.searchedFor || "—"}
                 {fav.condition && ` · ${fav.condition}`}
               </div>
-              <div className="flex items-center gap-3 mt-1.5">
+              {fav.reference && (
+                <a
+                  href={fav.reference.productUrl ?? fav.reference.itemWebUrl ?? fav.reference.ebaySearchUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm block mt-1"
+                  style={{ color: "var(--series-1)", textDecoration: "underline" }}
+                >
+                  vs ${fav.reference.ungradedPriceDollars.toFixed(2)} for &quot;{fav.reference.productName}&quot;
+                </a>
+              )}
+              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                 <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                   ${fav.priceDollars.toFixed(2)}
                 </span>
+                {fav.source === "auction" && fav.bidCount != null && (
+                  <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                    {fav.bidCount} bid{fav.bidCount === 1 ? "" : "s"} when starred
+                  </span>
+                )}
+                {fav.source === "auction" && fav.endsAt && new Date(fav.endsAt).getTime() < Date.now() && (
+                  <span className="text-xs font-semibold" style={{ color: "var(--critical)" }}>
+                    Likely ended
+                  </span>
+                )}
                 <span className="text-xs" style={{ color: "var(--text-muted)" }}>
                   Starred {new Date(fav.favoritedAt).toLocaleDateString()}
                 </span>
@@ -116,6 +144,12 @@ export default function CardFavorites() {
                   Remove
                 </button>
               </div>
+              {fav.estimatedProfitDollars != null && (
+                <div className="text-sm font-semibold mt-1" style={{ color: "var(--good)" }}>
+                  Est. profit when starred: ${fav.estimatedProfitDollars.toFixed(2)} after eBay fees
+                  {fav.source === "auction" ? ", if won at that bid" : ""}
+                </div>
+              )}
             </div>
           </div>
         ))}

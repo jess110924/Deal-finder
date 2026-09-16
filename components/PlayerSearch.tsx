@@ -64,6 +64,7 @@ export default function PlayerSearch() {
               condition: listing.condition,
               category,
               searchedFor: query.trim(),
+              source: "player-search",
             }),
           });
       if (!res.ok) {
