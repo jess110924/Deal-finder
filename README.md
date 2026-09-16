@@ -442,17 +442,36 @@ entire point.
 Each auction gets the same per-listing PriceCharting check and profit
 estimate as manual search (same `findCard`/`buildReferenceInfo`/
 `estimateResaleProfitDollars` machinery, same `MIN_WORTHWHILE_PROFIT_DOLLARS`
-cost cap, capped to the *soonest-ending* 12 rather than cheapest-12 —
-those are the actual candidates worth spending a lookup on), with one
+cost cap, capped to the *soonest-ending* 12 rather than cheapest-12 for
+the lookup itself — those are the actual candidates worth spending a
+lookup on regardless of the display sort described below), with one
 deliberate difference in framing: the profit shown is explicitly labeled
 "if won at this bid," never presented as a guaranteed number the way a
 Buy It Now listing's profit is. A live auction's current bid is not its
 final price — an auction with real time left, or bids already on it, can
 and does climb well past where it sits now. The `maxHours` filter
-("ending within 1 hour / 6 hours / 24 hours / 3 days / any time") exists
-because sniping is inherently about a specific window to act in, not a
-general browse — an auction three days out with $0 profit potential
-*right now* tells you nothing about what it'll actually close at.
+("ending within 15 minutes / 30 minutes / 1 hour / 6 hours / 24 hours /
+3 days / any time") exists because sniping is inherently about a
+specific window to act in, not a general browse — an auction three days
+out with $0 profit potential *right now* tells you nothing about what
+it'll actually close at. `maxHoursRemaining` in `searchEndingAuctions`
+takes fractional hours, so "30 minutes" is just `0.5`.
+
+Two more requested directly, both mirroring patterns already built for
+manual search:
+
+- **Only profitable auctions are shown**, same `isProfitable`/`wasChecked`
+  filtering as manual search's "only show profitable" — "loss listings
+  are of no use to me" applies here too. The transparency line ("N
+  auctions found · M checked against PriceCharting · K profitable")
+  makes "0 shown" legible the same way: it's the difference between
+  "checked 12, none profitable" and "found 40, only checked 12."
+- **A sort toggle** — "Ending soonest" (the original default, still
+  useful for "what do I need to watch right now") or "Price: low to
+  high." `sortBy` only reorders the final returned list; it doesn't
+  change which auctions get the soonest-ending-12 PriceCharting lookup
+  above, so switching to price sort doesn't spend lookups on a
+  cheapest-first subset instead.
 
 Didn't exist before the sold-comps period (this was requested and built
 during it), so there's no "old version" to revert to — it's adapted to
@@ -565,6 +584,39 @@ it — is baked into `lib/sources/pricecharting.ts` and
 sold comps and back (see "A brief detour through sold comps, and back"
 above): those modules kept the same rules rather than relearning the
 lessons a second time.
+
+Two more fixes on top, from a later "cards that come up aren't entirely
+accurate" report:
+
+- **A print-run denominator narrows the candidate pool before scoring.**
+  "/150" in the query is one of the strongest disambiguators
+  PriceCharting's product names carry — when the query has one and at
+  least one candidate's own text has the same one, `findCard` scores only
+  that subset first. Otherwise a wrong-denominator parallel ("Blue
+  Refractor /99") can out-score the real one ("Blue Refractor /150") on
+  generic word overlap alone.
+- **Ties are broken by specificity, not API response order.** A real
+  card and a "Collection"/"Ultra-Premium"/bundle variant of the same
+  card often tie on word overlap (both match every query word); the
+  bundle variant just has extra words the query didn't ask for. Confirmed
+  live: `"Mega Charizard X ex 109/094 Phantasmal Flames Full Art Ultra
+  Rare NM"` tied "Mega Charizard X ex #109" against "Mega Charizard X Ex
+  Ultra-Premium Collection" — now broken in favor of the fewer-total-words
+  candidate, the real single card, instead of leaving it to whichever
+  PriceCharting happened to return first.
+
+An IDF-weighted version of the overlap score (down-weight words most
+candidates share, up-weight rare ones) was tried for this same report
+and reverted after a live counterexample: querying the Charizard example
+above, PriceCharting's own search had already pre-filtered to dozens of
+relevant "Phantasmal Flames" candidates, so "mega"/"charizard"/
+"phantasmal"/"flames" — the actual subject — got down-weighted as "too
+common," and a "Sprigatito [Horizons Full Art] #109" candidate won
+instead on the rarer, coincidental overlap of "full"/"art"/"109". IDF
+assumes a broad, mostly-irrelevant corpus where a shared word is noise;
+here the corpus is already narrowed to relevant results, so a shared
+word is usually the real signal. Worth remembering if this scorer gets
+revisited again.
 
 ## Stack
 

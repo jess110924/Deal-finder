@@ -11,9 +11,15 @@ export async function GET(request: NextRequest) {
   const category: CardCategory = categoryParam === "pokemon" ? "pokemon" : "sports";
   const maxHoursParam = request.nextUrl.searchParams.get("maxHours");
   const maxHours = maxHoursParam ? Number(maxHoursParam) : undefined;
+  const sortBy = request.nextUrl.searchParams.get("sortBy") === "price" ? "price" : "time";
 
   try {
-    const auctions = await searchEndingAuctions(query, category, Number.isFinite(maxHours) ? maxHours : undefined);
+    const auctions = await searchEndingAuctions(
+      query,
+      category,
+      Number.isFinite(maxHours) ? maxHours : undefined,
+      sortBy
+    );
     return NextResponse.json({ auctions });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

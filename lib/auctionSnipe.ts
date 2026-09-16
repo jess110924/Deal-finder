@@ -22,6 +22,12 @@ export type AuctionSnipeResult = EbayAuctionListing & {
   // "nobody's found this yet" case sniping targets.
   estimatedProfitDollars: number | null;
   isProfitable: boolean;
+  // Whether this auction actually got a PriceCharting lookup, as opposed
+  // to being skipped past `AUCTION_MAX_LISTINGS_TO_EVALUATE` — same
+  // reasoning as CardListingResult.wasChecked in lib/cardComparison.ts:
+  // "checked, no match found" and "never checked" both otherwise look
+  // like `reference: null`, which a UI summary can't tell apart.
+  wasChecked: boolean;
 };
 
 // Same budget discipline as manual search (SEARCH_MAX_LISTINGS_TO_EVALUATE
@@ -42,7 +48,15 @@ async function evaluateAuction(auction: EbayAuctionListing, category: CardCatego
   }
 
   if (!reference?.ungradedPriceCents || reference.ungradedPriceCents <= 0) {
-    return { ...auction, currentBidDollars, minutesRemaining, reference: null, estimatedProfitDollars: null, isProfitable: false };
+    return {
+      ...auction,
+      currentBidDollars,
+      minutesRemaining,
+      reference: null,
+      estimatedProfitDollars: null,
+      isProfitable: false,
+      wasChecked: true,
+    };
   }
 
   const referenceInfo = await buildReferenceInfo(reference, category, false);
@@ -53,26 +67,47 @@ async function evaluateAuction(auction: EbayAuctionListing, category: CardCatego
   );
   const isProfitable = estimatedProfitDollars >= MIN_WORTHWHILE_PROFIT_DOLLARS;
 
-  return { ...auction, currentBidDollars, minutesRemaining, reference: referenceInfo, estimatedProfitDollars, isProfitable };
+  return {
+    ...auction,
+    currentBidDollars,
+    minutesRemaining,
+    reference: referenceInfo,
+    estimatedProfitDollars,
+    isProfitable,
+    wasChecked: true,
+  };
 }
 
 /**
- * Live auctions for a card, soonest-ending first, each checked against
- * its own best-matching PriceCharting product — same "each listing gets
- * its own comparison" rule as manual search, for the same reason (see
- * evaluateListing in lib/cardComparison.ts). `maxHoursRemaining`, when
- * given, drops anything ending further out than that — sniping is about
- * acting in a specific window, not browsing every auction that exists
- * for a card.
+ * Live auctions for a card, each checked against its own best-matching
+ * PriceCharting product — same "each listing gets its own comparison"
+ * rule as manual search, for the same reason (see evaluateListing in
+ * lib/cardComparison.ts). `maxHoursRemaining`, when given, drops anything
+ * ending further out than that — sniping is about acting in a specific
+ * window, not browsing every auction that exists for a card. Fractional
+ * values work (0.5 = 30 minutes), so the window can go tighter than an
+ * hour.
  *
- * Capped to the soonest-ending `AUCTION_MAX_LISTINGS_TO_EVALUATE` for
- * the PriceCharting lookup — the rest are still returned (title, bid,
- * time left, link), just without their own reference/profit estimate.
+ * Capped to the soonest-ending `AUCTION_MAX_LISTINGS_TO_EVALUATE` for the
+ * PriceCharting lookup regardless of `sortBy` below — those are the
+ * actual snipe candidates worth spending a lookup on even if the final
+ * list is displayed sorted by price. The rest are still returned (title,
+ * bid, time left, link), just without their own reference/profit
+ * estimate.
+ *
+ * `sortBy` controls the order of the final, returned list only (not which
+ * auctions get evaluated, above): "time" (default) is soonest-ending
+ * first — "what do I need to watch in the next hour" — `"price"` is
+ * current bid lowest-to-highest, requested directly as a second way to
+ * scan results. Price is always known (it's on the raw auction, not
+ * something that requires a PriceCharting lookup), so this sort applies
+ * cleanly whether or not a given auction was actually checked.
  */
 export async function searchEndingAuctions(
   query: string,
   category: CardCategory,
-  maxHoursRemaining?: number
+  maxHoursRemaining?: number,
+  sortBy: "time" | "price" = "time"
 ): Promise<AuctionSnipeResult[]> {
   const effectiveQuery = extractSerialDenominator(query) ? extractSearchKeywords(query) : query;
   const rawAuctions = await searchAuctionListings(effectiveQuery, category);
@@ -104,10 +139,11 @@ export async function searchEndingAuctions(
     reference: null,
     estimatedProfitDollars: null,
     isProfitable: false,
+    wasChecked: false,
   }));
 
-  // Ending soonest first, preserved from eBay's own sort — that's the
-  // actual point (what do I need to watch in the next hour), not a
-  // profit-sorted list like manual search.
-  return [...evaluated, ...skipped].sort((a, b) => a.minutesRemaining - b.minutesRemaining);
+  const combined = [...evaluated, ...skipped];
+  return sortBy === "price"
+    ? combined.sort((a, b) => a.currentBidDollars - b.currentBidDollars)
+    : combined.sort((a, b) => a.minutesRemaining - b.minutesRemaining);
 }

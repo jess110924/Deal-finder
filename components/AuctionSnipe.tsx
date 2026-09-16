@@ -5,12 +5,19 @@ import type { CardCategory } from "@/lib/cardComparison";
 import type { AuctionSnipeResult } from "@/lib/auctionSnipe";
 
 const HOURS_OPTIONS = [
+  { label: "15 minutes", value: "0.25" },
+  { label: "30 minutes", value: "0.5" },
   { label: "1 hour", value: "1" },
   { label: "6 hours", value: "6" },
   { label: "24 hours", value: "24" },
   { label: "3 days", value: "72" },
   { label: "Any time", value: "" },
 ];
+
+const SORT_OPTIONS = [
+  { label: "Ending soonest", value: "time" },
+  { label: "Price: low to high", value: "price" },
+] as const;
 
 function formatTimeRemaining(minutes: number): string {
   if (minutes < 0) return "Ended";
@@ -27,6 +34,7 @@ export default function AuctionSnipe() {
   const [category, setCategory] = useState<CardCategory>("sports");
   const [query, setQuery] = useState("");
   const [maxHours, setMaxHours] = useState("24");
+  const [sortBy, setSortBy] = useState<"time" | "price">("time");
   const [auctions, setAuctions] = useState<AuctionSnipeResult[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +47,7 @@ export default function AuctionSnipe() {
     setError(null);
     setAuctions(null);
     try {
-      const params = new URLSearchParams({ q: query.trim(), category });
+      const params = new URLSearchParams({ q: query.trim(), category, sortBy });
       if (maxHours) params.set("maxHours", maxHours);
       const res = await fetch(`/api/cards/auctions?${params}`);
       const json = await res.json();
@@ -52,6 +60,15 @@ export default function AuctionSnipe() {
     }
   }
 
+  // Requested directly: "loss listings are of no use to me, I only want
+  // to see auctions with a profit" — same reasoning and pattern as
+  // CardSearch's profitable-only filter. `checked` vs `profitable` (not
+  // just auctions.length vs profitable.length) is what makes "0 shown"
+  // legible: it's the difference between "checked 12, none profitable"
+  // and "found 40, only checked 12."
+  const checked = auctions?.filter((a) => a.wasChecked) ?? [];
+  const profitable = auctions?.filter((a) => a.isProfitable) ?? [];
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -59,10 +76,11 @@ export default function AuctionSnipe() {
           Auction Sniper
         </h2>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Live auctions for a card, soonest-ending first, compared against PriceCharting&apos;s
-          reference price. The current bid is <strong>not the final price</strong> — an auction with
-          time left or existing bids can still climb well past it. This is most useful for auctions
-          ending very soon with few or no bids yet, the ones nobody&apos;s found.
+          Live auctions for a card, compared against PriceCharting&apos;s reference price. Only
+          auctions with an estimated profit if won at the current bid are shown. The current bid is{" "}
+          <strong>not the final price</strong> — an auction with time left or existing bids can still
+          climb well past it. This is most useful for auctions ending very soon with few or no bids
+          yet, the ones nobody&apos;s found.
         </p>
       </div>
 
@@ -118,6 +136,18 @@ export default function AuctionSnipe() {
             </option>
           ))}
         </select>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as "time" | "price")}
+          className="rounded-md px-2 py-2 text-sm"
+          style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
+        >
+          {SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              Sort: {opt.label}
+            </option>
+          ))}
+        </select>
         <button
           type="submit"
           disabled={loading}
@@ -136,12 +166,24 @@ export default function AuctionSnipe() {
 
       {auctions && (
         <div className="flex flex-col gap-2">
+          {auctions.length > 0 && (
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+              {auctions.length} auction{auctions.length === 1 ? "" : "s"} found · {checked.length} checked against
+              PriceCharting · {profitable.length} profitable.
+            </p>
+          )}
           {auctions.length === 0 && (
             <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
               No live auctions found in that window.
             </p>
           )}
-          {auctions.map((auction) => (
+          {auctions.length > 0 && profitable.length === 0 && (
+            <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
+              No profitable auctions in this window — {checked.length} checked,{" "}
+              {auctions.length - checked.length} not checked (past the 12-auction cap).
+            </p>
+          )}
+          {profitable.map((auction) => (
             <div
               key={auction.itemId}
               className="rounded-lg overflow-hidden flex flex-col"
@@ -198,13 +240,10 @@ export default function AuctionSnipe() {
                     {formatTimeRemaining(auction.minutesRemaining)}
                   </span>
                 </div>
+                {/* Every auction here already cleared MIN_WORTHWHILE_PROFIT_DOLLARS, so this is always a profit. */}
                 {auction.estimatedProfitDollars != null && (
-                  <div
-                    className="text-sm font-semibold mt-1"
-                    style={{ color: auction.isProfitable ? "var(--good)" : "var(--critical)" }}
-                  >
-                    {auction.estimatedProfitDollars >= 0 ? "Est. profit" : "Est. loss"}: $
-                    {Math.abs(auction.estimatedProfitDollars).toFixed(2)} after eBay fees, if won at this bid
+                  <div className="text-sm font-semibold mt-1" style={{ color: "var(--good)" }}>
+                    Est. profit: ${auction.estimatedProfitDollars.toFixed(2)} after eBay fees, if won at this bid
                   </div>
                 )}
               </div>

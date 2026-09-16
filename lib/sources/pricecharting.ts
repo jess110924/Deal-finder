@@ -1,4 +1,5 @@
 import type { CardCategory } from "@/lib/sources/ebay";
+import { extractSerialDenominator } from "@/lib/cardKeywords";
 
 // SportsCardsPro and PriceCharting are the same company/account/API key/
 // response shape, but scoped to different card types — confirmed live by
@@ -70,10 +71,25 @@ function tokenize(s: string): Set<string> {
 // Fraction of the query's own words that actually appear in a candidate's
 // name — not the other way around, since a candidate naturally carries
 // extra words (year, set, subset) the query didn't ask for.
-function relevanceScore(query: string, productName: string, consoleName: string): number {
-  const queryTokens = tokenize(query);
+//
+// An IDF-weighted version of this (down-weighting words shared by most
+// candidates, up-weighting rare ones) was tried and reverted after a
+// live counterexample: querying "Mega Charizard X ex 109/094 Phantasmal
+// Flames Full Art Ultra Rare NM" against Pokemon, the real match ("Mega
+// Charizard X ex #109", console "Pokemon Phantasmal Flames") shares
+// "mega"/"charizard"/"phantasmal"/"flames" with dozens of other Phantasmal
+// Flames candidates PriceCharting's own search already returned — so IDF
+// down-weighted exactly those words as "too common" and instead promoted
+// "Sprigatito [Horizons Full Art] #109" on the rarer, coincidental overlap
+// of "full"/"art"/"109". The premise doesn't hold here: PriceCharting's
+// search already pre-filters to relevant candidates, so a word most of
+// them share is usually the actual subject, not noise. Flat fraction
+// handles this case correctly on its own — the real match and "Mega
+// Charizard X Ex Ultra-Premium Collection" tie at the same fraction, and
+// the specificity tie-break below picks the real match over the
+// bundle/collection variant.
+function relevanceScore(queryTokens: Set<string>, candidateTokens: Set<string>): number {
   if (queryTokens.size === 0) return 0;
-  const candidateTokens = tokenize(`${productName} ${consoleName}`);
   let overlap = 0;
   for (const t of queryTokens) if (candidateTokens.has(t)) overlap++;
   return overlap / queryTokens.size;
@@ -102,21 +118,58 @@ function relevanceScore(query: string, productName: string, consoleName: string)
  * Mavericks /50" stripped to "Kyrie Irving gold /50" matched a wrong 2024
  * Panini Prizm Monopoly card; the full query correctly matches the real
  * 2025 Topps Inception product).
+ *
+ * Two further accuracy passes on top of the position-0 fix above, both
+ * from the same "cards that come up aren't accurate" report:
+ *
+ * 1. A print-run denominator ("/150") in the query is one of the
+ *    strongest disambiguators PriceCharting's own product names carry —
+ *    when the query has one and at least one candidate's own text has
+ *    the same one, scoring is restricted to just that subset first.
+ *    Otherwise a wrong-denominator parallel ("Blue Refractor /99") can
+ *    still out-score the real one ("Blue Refractor /150") on generic
+ *    word overlap alone, since a plain overlap fraction doesn't treat
+ *    "/150 not present" as disqualifying on its own.
+ * 2. Ties on the overlap score (common — a real card and a "Collection"/
+ *    "Ultra-Premium"/bundle variant of the same card often share every
+ *    query word) are now broken in favor of the candidate with fewer
+ *    total words, instead of whichever PriceCharting happened to return
+ *    first. A bundle/collection product name always carries extra words
+ *    the single-card query didn't ask for, so the more specific,
+ *    single-card name is the better bet between two otherwise-equal
+ *    matches. Confirmed live: "Mega Charizard X ex #109" vs "Mega
+ *    Charizard X Ex Ultra-Premium Collection" (both Pokemon Phantasmal
+ *    Flames) tie on word overlap; specificity now picks the real single
+ *    card instead of leaving it to API response order.
  */
 export async function findCard(query: string, category: CardCategory): Promise<CardReference | null> {
   const json = await pcFetch(category, "/products", { q: query });
-  const products = Array.isArray(json?.products) ? json.products : [];
+  let products: Record<string, unknown>[] = Array.isArray(json?.products) ? json.products : [];
   if (products.length === 0) return null;
+
+  const serial = extractSerialDenominator(query);
+  if (serial) {
+    const withSerial = products.filter((p) =>
+      `${p["product-name"] ?? ""} ${p["console-name"] ?? ""}`.includes(serial)
+    );
+    if (withSerial.length > 0) products = withSerial;
+  }
+
+  const queryTokens = tokenize(query);
+  const candidateTokenSets = products.map((p) => tokenize(`${p["product-name"] ?? ""} ${p["console-name"] ?? ""}`));
 
   let best = products[0];
   let bestScore = -1;
-  for (const p of products) {
-    const score = relevanceScore(query, String(p["product-name"] ?? ""), String(p["console-name"] ?? ""));
-    if (score > bestScore) {
+  let bestSpecificity = Infinity;
+  products.forEach((p, i) => {
+    const score = relevanceScore(queryTokens, candidateTokenSets[i]);
+    const specificity = candidateTokenSets[i].size;
+    if (score > bestScore || (score === bestScore && specificity < bestSpecificity)) {
       bestScore = score;
+      bestSpecificity = specificity;
       best = p;
     }
-  }
+  });
   return mapProduct(best);
 }
 
