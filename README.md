@@ -1,7 +1,7 @@
 # Deal Finder
 
-A fast-scanning deal aggregator: one feed, pulling from 14 active sources
-(17 configured — 3 Reddit ones are built but currently disabled, see
+A fast-scanning deal aggregator: one feed, pulling from 16 active sources
+(19 configured — 3 Reddit ones are built but currently disabled, see
 Sources below), built for scanning quickly rather than passively waiting
 for Discord alerts. Dark theme, product thumbnails on every source. Also
 has a `/cards` page for finding underpriced sports card and Pokémon card
@@ -112,23 +112,23 @@ your browser), so it's the same list regardless of which device you
 check it from.
 
 The automatic recurring re-check (every ~30 minutes via
-`.github/workflows/check-watchlist.yml`) is currently disabled — schedule
-commented out, `workflow_dispatch` left so it can still be triggered
-manually from the Actions tab. That was disabled specifically because of
-the sold-comps API's metered cost (an unattended job checking every
-listing for every watched card projected to tens of thousands of calls/
-month); PriceCharting doesn't have that same per-request billing concern,
-so re-enabling it now (uncomment the `schedule:` line) is a reasonable
-option if the every-30-min cadence is wanted back — just not done
-automatically as part of this revert, since it wasn't asked for.
+`.github/workflows/check-watchlist.yml`) is **re-enabled** — requested
+directly as the highest-leverage way to actually beat other buyers to an
+underpriced listing, once the original reason it was disabled (the
+sold-comps API's metered cost — an unattended job checking every listing
+for every watched card projected to tens of thousands of calls/month)
+stopped applying after the revert back to PriceCharting, which isn't
+billed per-request the same way. `workflow_dispatch` still works too,
+for an on-demand run from the Actions tab.
 
 Adding a card runs one check immediately (takes a few seconds — it's a
-real eBay search + sold-comps check, the "Add" button shows "Checking…"
-while it runs, capped to the cheapest 5 listings for the same budget
-reasons as above) rather than only registering the card with nothing to
-look at. If that immediate check happens to fail for some reason, the
-card still gets added to the watchlist regardless — a message says the
-check itself failed rather than acting like the add did.
+real eBay search + PriceCharting check, the "Add" button shows
+"Checking…" while it runs, capped to the cheapest 5 listings for the
+same reasons as above) rather than only registering the card with
+nothing to look at. If that immediate check happens to fail for some
+reason, the card still gets added to the watchlist regardless — a
+message says the check itself failed rather than acting like the add
+did.
 
 There's also a **bulk add** option ("Add multiple cards at once" link
 under the search box) for seeding the watchlist with many cards in one
@@ -203,18 +203,18 @@ this needs). Connecting it auto-injects `KV_REST_API_URL` /
 `KV_REST_API_TOKEN`, which `lib/db.ts` reads automatically — no manual
 key-copying for this one.
 
-**Scheduling** (currently disabled, see "A brief detour through sold
-comps, and back" above): Vercel's own Cron Jobs cap out at once per day
-on the free Hobby plan
-(any more frequent schedule fails at deploy time) — too coarse for
-catching a listing before someone else buys it. Instead,
-`.github/workflows/check-watchlist.yml` was built to run on a GitHub
-Actions schedule every 30 minutes (no such cap there, and it's free) and
-call `POST /api/cards/check-watchlist` on the deployed site. That
-endpoint sits outside the site's normal cookie-based login (see
-`proxy.ts`) since a script has no browser session to present — it checks
-its own secret instead. All of this still exists and works — the
-`schedule:` trigger is just commented out.
+**Scheduling**: Vercel's own Cron Jobs cap out at once per day on the
+free Hobby plan (any more frequent schedule fails at deploy time) — too
+coarse for catching a listing before someone else buys it. Instead,
+`.github/workflows/check-watchlist.yml` runs on a GitHub Actions
+schedule every 30 minutes (no such cap there, and it's free) and calls
+`POST /api/cards/check-watchlist` on the deployed site. That endpoint
+sits outside the site's normal cookie-based login (see `proxy.ts`) since
+a script has no browser session to present — it checks its own secret
+instead. This was disabled for a while over the sold-comps API's metered
+cost (see "A brief detour through sold comps, and back" above) and
+**re-enabled** once that stopped applying after the revert back to
+PriceCharting.
 
 #### Setup
 
@@ -229,17 +229,23 @@ its own secret instead. All of this still exists and works — the
    deployed site's URL (e.g. `https://deal-finder-yourname.vercel.app`,
    **no trailing slash**)
 4. Redeploy (any push does this, or trigger one manually)
-5. To manually trigger a check (the automatic schedule is disabled): on
-   GitHub, go to **Actions** tab → "Check card watchlist" workflow →
-   **Run workflow** button (works because of the `workflow_dispatch`
-   trigger in the yml file) — or uncomment the `schedule:` line in the
-   workflow file to turn automatic checks back on.
+5. It now runs automatically every 30 minutes. To also trigger a check
+   on demand: on GitHub, go to **Actions** tab → "Check card watchlist"
+   workflow → **Run workflow** button (works because of the
+   `workflow_dispatch` trigger in the yml file, kept alongside the
+   schedule).
 
 ### Discover — finding deals without naming a card first
 
-**Currently disabled** — see "A brief detour through sold comps, and
-back" above. Everything below describes what it does when run (manually,
-via `workflow_dispatch`, or with the schedule uncommented).
+**Currently disabled** — originally over the sold-comps API's metered
+cost (see "A brief detour through sold comps, and back" above), which
+stopped applying after the revert back to PriceCharting the same way it
+did for the watchlist's schedule above. Kept disabled anyway, by choice,
+when the watchlist schedule was re-enabled — Discover is noisier (a
+guessed subject from a raw eBay title vs. a name you typed yourself), so
+left manual-only rather than turned back on by default along with it.
+Everything below describes what it does when run (manually, via
+`workflow_dispatch`, or with the schedule uncommented).
 
 The watchlist only ever checks cards it's explicitly told about — it
 can't surface a card worth watching that nobody's added yet. Discover
@@ -826,7 +832,9 @@ sources need no API key. The 9th (Keepa) needs your key, see below.
 | Slickdeals: Target | No | Deals mentioning Target specifically |
 | Slickdeals: Walmart | No | Deals mentioning Walmart specifically |
 | Slickdeals: Food & Grocery | No | Grocery items, restaurant gift cards/offers |
-| Slickdeals: More Categories | No | Clothing, shoes, kitchen, toys, beauty, pet, travel |
+| Slickdeals: More Categories | No | Clothing, shoes, kitchen, toys, beauty, pet, travel, collectibles, sneakers |
+| Slickdeals: Electronics | No | Headphones, chargers, tablets, general electronics |
+| Slickdeals: Video Games & Consoles | No | Games, consoles, related gear |
 | CheapShark | No | PC games currently $0 across Steam, GOG, Epic, etc. |
 | Epic Games Store | No | Epic's own free-game giveaways |
 | **Keepa** | **Yes** | Real Amazon price-drop search across their whole catalog |
@@ -906,16 +914,34 @@ testing) — the same tradeoff PC Parts already makes for full-PC-bundle
 listings. Together these push total live feed volume from ~551 to ~776
 in testing.
 
+**Slickdeals: Electronics / Slickdeals: Video Games & Consoles, plus
+collectibles/sneakers folded into More Categories**, added directly for
+resale ("I want to find profitable deals so I can sell them"). Every
+candidate keyword confirmed live before deciding where it landed:
+"electronics" and "video games" came back clean and genuinely relevant
+(real headphones/tablet/console/game deals, not noise), so — same
+reasoning as Target/Walmart getting their own toggle instead of being
+folded into a broad bucket — they got dedicated sources. "collectibles"
+and "sneakers" did not come back clean (kitchenware, board games, and
+kids' slip-ons mixed in with the real hits), so those went into the
+already-noise-tolerant More Categories bucket instead of getting their
+own toggle. TechBargains was tried first and rejected — it sits behind a
+Cloudflare bot challenge (confirmed live, same as PriceCharting's own
+product pages elsewhere in this project), so no RSS feed is actually
+reachable from here.
+
 **Reddit (r/deals, r/GameDeals, r/buildapcsales) is fully built
 (`lib/sources/reddit.ts`, OAuth-based specifically because Reddit
 403s/429s anonymous RSS scraping from cloud IPs) but currently
 commented out in `lib/config.ts`** pending `REDDIT_CLIENT_ID`/
 `REDDIT_CLIENT_SECRET` — re-enable by uncommenting those three lines and
-adding the two env vars once a Reddit script-type app is set up. This is
-the single biggest lever for more deal volume left on the table — r/
-buildapcsales specifically would meaningfully add to PC parts coverage
-on top of Slickdeals PC Parts above, since it's community-curated rather
-than keyword-matched.
+adding the two env vars once a Reddit script-type app is set up. This
+remains the single biggest lever for more deal volume left on the
+table (r/buildapcsales specifically would meaningfully add to PC parts
+coverage on top of Slickdeals PC Parts above, since it's
+community-curated rather than keyword-matched) — deliberately left out
+again when general-source expansion was requested, rather than pursued
+without being asked.
 
 **Other easy levers, not yet done:**
 - `KEEPA_MIN_DISCOUNT` (default 40) is a tunable env var, not a hard
@@ -923,6 +949,11 @@ than keyword-matched.
   API call, at no extra token cost. The independent `salesRankDrops90 > 0`
   check (see below) still guards against fake-looking ones regardless of
   where this threshold is set, so lowering it doesn't reopen that problem.
+- `KEEPA_MAX_PAGES` (default 1, unchanged behavior) now exists too —
+  requested directly ("Keepa/Amazon expansion"). Each additional page is
+  its own metered Keepa API call (deduped by ASIN across pages), so
+  raising it is an explicit opt-in rather than a default increase in
+  token spend — see `fetchDeals`'s doc comment in `lib/sources/keepa.ts`.
 - [IsThereAnyDeal](https://isthereanydeal.com/apps/) has a free public API
   that aggregates game deals across far more storefronts than CheapShark +
   Epic alone (Steam, GOG, Humble, Fanatical, and more) — would need a free
@@ -1056,7 +1087,7 @@ site is wide open without it.
 - `app/api/cards/confirmed/route.ts`, `mismatches/route.ts` — My Picks / Mismatches endpoints
 - `app/api/cards/watchlist/bulk/route.ts` — bulk-add endpoint (no immediate check)
 - `app/api/cards/check-watchlist/route.ts` — the watchlist check endpoint
-- `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action (schedule currently disabled — see "A brief detour through sold comps, and back")
+- `.github/workflows/check-watchlist.yml` — the every-30-min GitHub Action (re-enabled)
 - `lib/cardDiscovery.ts` — browses eBay live listings for deals with no name given
 - `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the Discover run (schedule currently disabled)
 - `components/PlayerSearch.tsx`, `lib/playerSearch.ts` — price-banded player browse + peer-listing check

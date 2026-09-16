@@ -60,7 +60,11 @@ export async function aggregateDeals(): Promise<{ deals: Deal[]; results: Source
             raw = await epic.fetchDeals();
             break;
           case "keepa":
-            raw = await keepa.fetchDeals(Number(process.env.KEEPA_MIN_DISCOUNT) || 40);
+            // KEEPA_MAX_PAGES defaults to 1 (unchanged behavior) — each
+            // extra page is its own metered Keepa API call, so this is
+            // opt-in, not a default increase in token spend. See
+            // fetchDeals' doc comment in lib/sources/keepa.ts.
+            raw = await keepa.fetchDeals(Number(process.env.KEEPA_MIN_DISCOUNT) || 40, Number(process.env.KEEPA_MAX_PAGES) || 1);
             break;
         }
 

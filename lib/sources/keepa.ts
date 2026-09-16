@@ -24,16 +24,9 @@ const AMAZON_PRICE_TYPE = 0; // Keepa's standard CSV-type index for Amazon's own
  *   otherwise — join + String.fromCharCode gives a real filename, and
  *   Keepa's image CDN is `https://m.media-amazon.com/images/I/<filename>`.
  */
-export async function fetchDeals(minDiscountPercent = 40): Promise<RawDeal[]> {
-  const apiKey = process.env.KEEPA_API_KEY;
-  if (!apiKey) {
-    throw new Error("KEEPA_API_KEY is not set.");
-  }
-
-  const maxSalesRank = Number(process.env.KEEPA_MAX_SALES_RANK) || 300000;
-
+async function fetchPage(apiKey: string, minDiscountPercent: number, maxSalesRank: number, page: number): Promise<KeepaDeal[]> {
   const selection = {
-    page: 0,
+    page,
     domainId: US_DOMAIN_ID,
     priceTypes: [AMAZON_PRICE_TYPE],
     deltaPercentRange: [minDiscountPercent, 100],
@@ -62,7 +55,39 @@ export async function fetchDeals(minDiscountPercent = 40): Promise<RawDeal[]> {
     throw new Error(`Keepa API error: ${JSON.stringify(json.error)}`);
   }
 
-  const rawDeals: KeepaDeal[] = json?.deals?.dr ?? [];
+  return json?.deals?.dr ?? [];
+}
+
+/**
+ * `maxPages` (default 1, the original behavior) fetches additional pages
+ * of the same selection — requested directly ("expand what Keepa
+ * tracks" for resale deal-hunting). Each page is its own Keepa API call
+ * and consumes tokens the same as the first, so this is opt-in via
+ * `KEEPA_MAX_PAGES` (see the call site in lib/aggregate.ts) rather than
+ * a default that would silently increase token spend on a paid,
+ * metered API — same reasoning this project already applied to
+ * sold-comps and PriceCharting request volume elsewhere. Pages are
+ * fetched sequentially, not in parallel, out of the same caution.
+ */
+export async function fetchDeals(minDiscountPercent = 40, maxPages = 1): Promise<RawDeal[]> {
+  const apiKey = process.env.KEEPA_API_KEY;
+  if (!apiKey) {
+    throw new Error("KEEPA_API_KEY is not set.");
+  }
+
+  const maxSalesRank = Number(process.env.KEEPA_MAX_SALES_RANK) || 300000;
+
+  const seenAsins = new Set<string>();
+  const rawDeals: KeepaDeal[] = [];
+  for (let page = 0; page < Math.max(1, maxPages); page++) {
+    const pageDeals = await fetchPage(apiKey, minDiscountPercent, maxSalesRank, page);
+    if (pageDeals.length === 0) break; // no more results — later pages would just be empty
+    for (const d of pageDeals) {
+      if (seenAsins.has(d.asin)) continue;
+      seenAsins.add(d.asin);
+      rawDeals.push(d);
+    }
+  }
 
   const deals = rawDeals
     // Second, independent legitimacy check beyond the request-level filters

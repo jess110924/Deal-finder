@@ -125,7 +125,35 @@ export const SOURCES: SourceConfig[] = [
       "https://slickdeals.net/newsearch.php?q=beauty&rss=1",
       "https://slickdeals.net/newsearch.php?q=pet%20supplies&rss=1",
       "https://slickdeals.net/newsearch.php?q=travel&rss=1",
+      // Both added for resale ("I want to find profitable deals so I
+      // can sell them"): collectibles/sneakers deals are exactly the
+      // kind of thing worth reselling, but neither keyword search is
+      // clean enough on its own to be a dedicated source — confirmed
+      // live, "collectibles" pulls in plenty of unrelated kitchenware
+      // and board games, "sneakers" pulls in kids' slip-ons alongside
+      // real sneaker deals. Folded into the already-noise-tolerant
+      // bucket instead of given their own toggle.
+      "https://slickdeals.net/newsearch.php?q=collectibles&rss=1",
+      "https://slickdeals.net/newsearch.php?q=sneakers&rss=1",
     ],
+  },
+  // Added for resale, unlike More Categories above: confirmed live these
+  // two keyword searches come back clean and genuinely relevant (real
+  // electronics/gaming deals, not noise), so they get their own
+  // dedicated, toggleable source the way Target/Walmart do — electronics
+  // and games/consoles are both real, common resale categories, unlike
+  // most of what's in the broad bucket.
+  {
+    name: "electronics",
+    label: "Slickdeals: Electronics",
+    type: "rss",
+    url: "https://slickdeals.net/newsearch.php?q=electronics&rss=1",
+  },
+  {
+    name: "video-games",
+    label: "Slickdeals: Video Games & Consoles",
+    type: "rss",
+    url: "https://slickdeals.net/newsearch.php?q=video%20games&rss=1",
   },
   { name: "free-games-cheapshark", label: "CheapShark (free games)", type: "cheapshark" },
   { name: "free-games-epic", label: "Epic Games (free games)", type: "epic" },
