@@ -1,5 +1,5 @@
 import { searchAuctionListings, type EbayAuctionListing, type CardCategory } from "@/lib/sources/ebay";
-import { isGraded, isBundle, MIN_WORTHWHILE_PROFIT_DOLLARS, buildReferenceInfo } from "@/lib/cardComparison";
+import { isGraded, isBundle, buildReferenceInfo } from "@/lib/cardComparison";
 import { extractSearchKeywords, extractSerialDenominator } from "@/lib/cardKeywords";
 import { findCard } from "@/lib/sources/pricecharting";
 import type { ReferenceInfo } from "@/lib/db";
@@ -30,11 +30,29 @@ export type AuctionSnipeResult = EbayAuctionListing & {
   wasChecked: boolean;
 };
 
-// Same budget discipline as manual search (SEARCH_MAX_LISTINGS_TO_EVALUATE
-// in lib/cardComparison.ts) — bounds concurrent PriceCharting requests
-// per search.
-const AUCTION_MAX_LISTINGS_TO_EVALUATE = 12;
+// Fetches more than eBay's/searchAuctionListings' 30-item default and
+// evaluates more than manual search's SEARCH_MAX_LISTINGS_TO_EVALUATE (12)
+// — requested directly after a "within the day" search only checked 12
+// of the 20-25 auctions actually returned, missing real profitable ones
+// sitting just past the cap. PriceCharting isn't billed per-request the
+// way sold comps was (see "A brief detour through sold comps, and back"
+// in the README), so there's no cost reason to keep this as tight as the
+// sold-comps era did; their docs mention a 1-request/second limit and
+// concurrency 12 hasn't shown rate-limiting in testing at this volume.
+const AUCTION_FETCH_LIMIT = 50;
+const AUCTION_MAX_LISTINGS_TO_EVALUATE = 25;
 const LOOKUP_CONCURRENCY = 12;
+
+// Auction Sniper's own, much lower bar than manual search's
+// MIN_WORTHWHILE_PROFIT_DOLLARS ($5) — requested directly ("make sure
+// the listings that do show up are profitable even if it's a penny").
+// Manual search's $5 floor exists because a real flip costs real effort
+// or it's not worth the API-comparable "browse and decide" flow; sniping
+// is a different use case — a fast scan of what's ending soon that's
+// merely worth a second look, where a $0.25 edge on a $1 bid is still
+// useful signal even if it wouldn't clear manual search's bar. Strictly
+// greater than zero, not "not a loss" — breakeven isn't a profit.
+const MIN_AUCTION_PROFIT_DOLLARS = 0;
 
 async function evaluateAuction(auction: EbayAuctionListing, category: CardCategory): Promise<AuctionSnipeResult> {
   const currentBidDollars = auction.currentBidCents / 100;
@@ -65,7 +83,7 @@ async function evaluateAuction(auction: EbayAuctionListing, category: CardCatego
     auction.shippingCents / 100,
     referenceInfo.ungradedPriceDollars
   );
-  const isProfitable = estimatedProfitDollars >= MIN_WORTHWHILE_PROFIT_DOLLARS;
+  const isProfitable = estimatedProfitDollars > MIN_AUCTION_PROFIT_DOLLARS;
 
   return {
     ...auction,
@@ -110,7 +128,7 @@ export async function searchEndingAuctions(
   sortBy: "time" | "price" = "time"
 ): Promise<AuctionSnipeResult[]> {
   const effectiveQuery = extractSerialDenominator(query) ? extractSearchKeywords(query) : query;
-  const rawAuctions = await searchAuctionListings(effectiveQuery, category);
+  const rawAuctions = await searchAuctionListings(effectiveQuery, category, AUCTION_FETCH_LIMIT);
 
   let auctions = rawAuctions.filter((a) => !isGraded(a.condition) && !isBundle(a.title) && a.currentBidCents > 0);
 

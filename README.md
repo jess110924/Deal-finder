@@ -441,37 +441,61 @@ entire point.
 
 Each auction gets the same per-listing PriceCharting check and profit
 estimate as manual search (same `findCard`/`buildReferenceInfo`/
-`estimateResaleProfitDollars` machinery, same `MIN_WORTHWHILE_PROFIT_DOLLARS`
-cost cap, capped to the *soonest-ending* 12 rather than cheapest-12 for
-the lookup itself — those are the actual candidates worth spending a
-lookup on regardless of the display sort described below), with one
-deliberate difference in framing: the profit shown is explicitly labeled
-"if won at this bid," never presented as a guaranteed number the way a
-Buy It Now listing's profit is. A live auction's current bid is not its
-final price — an auction with real time left, or bids already on it, can
-and does climb well past where it sits now. The `maxHours` filter
-("ending within 15 minutes / 30 minutes / 1 hour / 6 hours / 24 hours /
-3 days / any time") exists because sniping is inherently about a
-specific window to act in, not a general browse — an auction three days
-out with $0 profit potential *right now* tells you nothing about what
-it'll actually close at. `maxHoursRemaining` in `searchEndingAuctions`
-takes fractional hours, so "30 minutes" is just `0.5`.
+`estimateResaleProfitDollars` machinery), capped to the *soonest-ending*
+`AUCTION_MAX_LISTINGS_TO_EVALUATE` (25) rather than cheapest-first for the
+lookup itself — those are the actual candidates worth spending a lookup
+on regardless of the display sort described below — fetched from a pool
+of up to `AUCTION_FETCH_LIMIT` (50) raw auctions, with one deliberate
+difference in framing: the profit shown is explicitly labeled "if won at
+this bid," never presented as a guaranteed number the way a Buy It Now
+listing's profit is. A live auction's current bid is not its final
+price — an auction with real time left, or bids already on it, can and
+does climb well past where it sits now. The `maxHours` filter ("ending
+within 15 minutes / 30 minutes / 1 hour / 6 hours / 24 hours / 3 days /
+any time") exists because sniping is inherently about a specific window
+to act in, not a general browse — an auction three days out with $0
+profit potential *right now* tells you nothing about what it'll actually
+close at. `maxHoursRemaining` in `searchEndingAuctions` takes fractional
+hours, so "30 minutes" is just `0.5`.
 
-Two more requested directly, both mirroring patterns already built for
-manual search:
+Three more requested directly, together fixing a real "not getting any
+listings" report:
 
 - **Only profitable auctions are shown**, same `isProfitable`/`wasChecked`
   filtering as manual search's "only show profitable" — "loss listings
   are of no use to me" applies here too. The transparency line ("N
   auctions found · M checked against PriceCharting · K profitable")
   makes "0 shown" legible the same way: it's the difference between
-  "checked 12, none profitable" and "found 40, only checked 12."
-- **A sort toggle** — "Ending soonest" (the original default, still
-  useful for "what do I need to watch right now") or "Price: low to
-  high." `sortBy` only reorders the final returned list; it doesn't
-  change which auctions get the soonest-ending-12 PriceCharting lookup
-  above, so switching to price sort doesn't spend lookups on a
-  cheapest-first subset instead.
+  "checked 25, none profitable" and "found 40, only checked 25."
+- **Its own, much lower profit bar** — `MIN_AUCTION_PROFIT_DOLLARS = 0`
+  (strictly greater than zero, not manual search's $5
+  `MIN_WORTHWHILE_PROFIT_DOLLARS`), requested directly: "make sure the
+  listings that do show up are profitable even if it's a penny."
+  Confirmed live this was the actual cause of "I'm not getting any
+  listings" — a real search returned several auctions sitting at
+  $0.25-$0.80 profit that the shared $5 floor was filtering out
+  entirely. Sniping is a faster scan of what's worth a second look, not
+  manual search's "worth the effort of a real flip" bar.
+- **The evaluation cap and fetch limit both went up** (12→25 evaluated,
+  30→50 fetched) — confirmed live a "within the day" search was only
+  checking 12 of the 20-25 auctions eBay actually returned, missing real
+  profitable ones sitting just past the old cap. PriceCharting isn't
+  billed per-request the way sold comps was (see "A brief detour through
+  sold comps, and back" above), so there's no cost reason to keep this
+  as tight as the sold-comps era did.
+
+Also fixed as part of the same report ("make sure the PriceCharting card
+matches the eBay auction card"): a real bundle-listing mismatch caught
+live in an Auction Sniper result — "43 Ja Morant Cards In Penny Sleeves"
+slipped past the existing bundle filter (no "lot"/"bundle"/parenthesized-
+count phrasing) and got compared against a single-card reference price,
+producing a nonsense profit estimate on a $3.99 bid. `isBundle` in
+`lib/cardKeywords.ts` now also catches "`<count> <a few words> Cards`"
+at the start of a title, anchored so it doesn't fire on a title that
+starts with a year (`^\d{1,3}\s+...` requires the leading number be 1-3
+digits, and a year is always 4). Shared by every feature that calls
+`isBundle` (search, watchlist, Discover, Auction Sniper), not just this
+one.
 
 Didn't exist before the sold-comps period (this was requested and built
 during it), so there's no "old version" to revert to — it's adapted to

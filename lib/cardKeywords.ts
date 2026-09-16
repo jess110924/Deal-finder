@@ -40,8 +40,20 @@ export function extractSerialDenominator(title: string): string | null {
 // filter didn't (and shouldn't have) caught it.
 const LOT_PATTERN = /\b(lot of|lot\/|\(\d+\)|\d+[- ]card lot|bundle)\b/i;
 
+// A second, narrower pattern for the phrasing LOT_PATTERN above misses:
+// "<count> <player> Cards ..." with no "lot"/"bundle" word at all.
+// Caught live from an Auction Sniper result: "43 Ja Morant Cards In Penny
+// Sleeves" slipped past LOT_PATTERN (no "lot"/"bundle"/parenthesized
+// count/"card lot" phrase) and got compared as if it were one card,
+// producing a nonsense profit estimate on a $3.99 bid. Anchored to the
+// START of the title and capped at a 1-3 digit leading number
+// specifically so this doesn't fire on a title that starts with a year
+// ("2020 Panini Donruss...") — years are always 4 digits and never have
+// a space directly after just the first 1-3 of them.
+const LEADING_COUNT_CARDS_PATTERN = /^\d{1,3}\s+\S+(\s+\S+){0,4}\s+cards?\b/i;
+
 export function isBundle(title: string): boolean {
-  return LOT_PATTERN.test(title);
+  return LOT_PATTERN.test(title) || LEADING_COUNT_CARDS_PATTERN.test(title);
 }
 
 function escapeRegExp(s: string): string {

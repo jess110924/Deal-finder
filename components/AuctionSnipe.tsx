@@ -77,7 +77,9 @@ export default function AuctionSnipe() {
         </h2>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
           Live auctions for a card, compared against PriceCharting&apos;s reference price. Only
-          auctions with an estimated profit if won at the current bid are shown. The current bid is{" "}
+          auctions with any estimated profit if won at the current bid are shown — even a few cents,
+          a lower bar than manual search&apos;s $5 minimum, since sniping is about scanning everything
+          worth a second look, not just what clears a real flip&apos;s effort. The current bid is{" "}
           <strong>not the final price</strong> — an auction with time left or existing bids can still
           climb well past it. This is most useful for auctions ending very soon with few or no bids
           yet, the ones nobody&apos;s found.
@@ -180,7 +182,7 @@ export default function AuctionSnipe() {
           {auctions.length > 0 && profitable.length === 0 && (
             <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
               No profitable auctions in this window — {checked.length} checked,{" "}
-              {auctions.length - checked.length} not checked (past the 12-auction cap).
+              {auctions.length - checked.length} not checked (past the 25-auction cap).
             </p>
           )}
           {profitable.map((auction) => (
