@@ -807,6 +807,46 @@ To re-enable once approved: add `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET`
 to `.env` (and to Vercel's environment variables + redeploy), then
 uncomment the three `reddit-*` entries in `lib/config.ts`.
 
+## A cross-source duplicate bug ("disable all filters, still see results")
+
+Reported directly and confirmed live to be a real, frequent problem, not
+an edge case: with every source toggle turned off, the feed's own "N
+shown" count correctly read 0, but the list below still showed dozens of
+deals. Root cause: `aggregateDeals()` (`lib/aggregate.ts`) only deduped
+by `id` *within* a single merged multi-URL source (PC Parts' six
+keyword searches, say) — it never deduped *across* separate
+`SourceConfig` entries. The same real Slickdeals thread frequently
+matches more than one source's keyword search (a deal in the generic
+Hot Deals firehose that also happens to match the Electronics search,
+for instance) and both copies carry the identical `id`. Confirmed live:
+128 distinct `thread-XXXXXXXX` ids duplicated across sources in one
+fetch, not a handful.
+
+That alone would just mean one real deal gets double- or triple-counted
+in the feed — worth fixing on its own for accuracy ("N shown" was
+inflated by every duplicate), but it also had a much stranger symptom:
+React logged "Encountered two children with the same key" for every one
+of those 128 duplicates, and — per React's own documented behavior for
+duplicate keys ("may cause children to be duplicated and/or omitted,
+the behavior is unsupported") — that corrupted list reconciliation
+badly enough that shrinking `visibleDeals` down to zero (all sources
+off) left stale `<DealRow>` elements on screen instead of actually
+removing them. Confirmed live: disabling every source dropped the
+computed count to 0 but left up to 110 rendered deal rows in the DOM,
+matching the report exactly.
+
+Fixed by deduping globally, once, after every source's fetch resolves,
+instead of per-source: `aggregateDeals()` now collects each source's raw
+deals into a `SOURCES`-indexed array first, then builds the final
+`deals` list by walking `SOURCES` in their own declared order (not
+fetch-completion order, which `Promise.all` doesn't preserve and which
+would otherwise make it unpredictable which source "wins" a collision
+between refreshes) and skipping any `id` already seen. Confirmed live
+after the fix: 0 duplicate-key warnings, disabling every source now
+correctly renders zero deal rows and shows the "Nothing here" message,
+and the honest total dropped from 865 "shown" to 715 — the difference
+being deals that were being counted more than once.
+
 ## Getting started
 
 ```bash

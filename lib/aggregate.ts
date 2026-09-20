@@ -15,11 +15,14 @@ function matchesRetailer(deal: RawDeal, retailer: string): boolean {
 }
 
 export async function aggregateDeals(): Promise<{ deals: Deal[]; results: SourceResult[] }> {
-  const deals: Deal[] = [];
-  const results: SourceResult[] = [];
+  // Indexed by SOURCES' own position, not fetch-completion order —
+  // Promise.all resolves whenever each source happens to finish, which
+  // isn't a stable order to dedupe against (see below).
+  const perSourceRaw: (RawDeal[] | null)[] = new Array(SOURCES.length).fill(null);
+  const results: (SourceResult | null)[] = new Array(SOURCES.length).fill(null);
 
   await Promise.all(
-    SOURCES.map(async (source) => {
+    SOURCES.map(async (source, index) => {
       try {
         let raw: RawDeal[];
         switch (source.type) {
@@ -68,15 +71,46 @@ export async function aggregateDeals(): Promise<{ deals: Deal[]; results: Source
             break;
         }
 
-        for (const d of raw) {
-          deals.push({ ...d, source: source.name, isStackable: isStackableDeal(d.title, d.description) });
-        }
-        results.push({ name: source.name, label: source.label, ok: true, count: raw.length });
+        perSourceRaw[index] = raw;
+        results[index] = { name: source.name, label: source.label, ok: true, count: raw.length };
       } catch (err) {
-        results.push({ name: source.name, label: source.label, ok: false, error: (err as Error).message, count: 0 });
+        perSourceRaw[index] = [];
+        results[index] = { name: source.name, label: source.label, ok: false, error: (err as Error).message, count: 0 };
       }
     })
   );
+
+  // Global dedupe across ALL sources, not just within one merged
+  // multi-URL source (PC Parts/More Categories above already dedupe
+  // internally, but that only covers collisions between that one
+  // source's own sub-searches). Reported directly ("when I disable all
+  // filters I still get search results") and confirmed live: the same
+  // real Slickdeals thread frequently matches more than one *separate*
+  // SourceConfig entry's keyword search (e.g. a deal in the generic Hot
+  // Deals firehose that also matches the Electronics search), producing
+  // the identical `id` from two different sources with nothing here to
+  // catch it — 128 duplicate-key React warnings confirmed this live, not
+  // a rare edge case. Beyond just double-counting one real deal in "N
+  // shown," undetected duplicate keys corrupted React's list
+  // reconciliation badly enough that toggling every source off left
+  // stale rows on screen instead of actually clearing the list — this
+  // fixes both.
+  //
+  // Deduped in `SOURCES`' own declared order (not fetch-completion
+  // order, which the `Promise.all` above doesn't preserve and which
+  // would otherwise make which source "wins" a collision unpredictable
+  // between refreshes) — whichever source is listed first in
+  // `lib/config.ts` keeps the deal.
+  const deals: Deal[] = [];
+  const seenIds = new Set<string>();
+  for (let i = 0; i < SOURCES.length; i++) {
+    const source = SOURCES[i];
+    for (const d of perSourceRaw[i] ?? []) {
+      if (seenIds.has(d.id)) continue;
+      seenIds.add(d.id);
+      deals.push({ ...d, source: source.name, isStackable: isStackableDeal(d.title, d.description) });
+    }
+  }
 
   // Newest first when a real publish date is known; undated deals (CheapShark,
   // Epic, Keepa — none of these carry a "posted at" timestamp) sort after
@@ -88,5 +122,5 @@ export async function aggregateDeals(): Promise<{ deals: Deal[]; results: Source
     return 0;
   });
 
-  return { deals, results };
+  return { deals, results: results.filter((r): r is SourceResult => r !== null) };
 }
