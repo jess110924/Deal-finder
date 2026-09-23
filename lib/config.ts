@@ -155,6 +155,29 @@ export const SOURCES: SourceConfig[] = [
     type: "rss",
     url: "https://slickdeals.net/newsearch.php?q=video%20games&rss=1",
   },
+  // Requested directly ("I want to travel outside the United States...
+  // I would like to get the best possible deal"). Checked several
+  // dedicated travel-deal sites live before picking one: secretflying.com
+  // sits behind a Cloudflare bot challenge (same problem as TechBargains
+  // elsewhere in this project, no RSS reachable); thepointsguy.com/feed
+  // and thriftytraveler.com/feed are both real, working feeds but turned
+  // out to be general blog/editorial content (credit card guides, "how
+  // to" posts, podcast episodes) — zero of 10 sampled Thrifty Traveler
+  // items were an actual priced deal, so neither matches this app's
+  // "deal" format at all. theflightdeal.com/feed is the opposite: every
+  // item follows a strict "Airline: Origin – Destination. $Price
+  // (Basic Economy) / $Price (Regular Economy). Roundtrip, including all
+  // Taxes" format that `extractPrice` in lib/sources/rss.ts parses
+  // cleanly, and of 16 live-sampled posts, 14 were international
+  // roundtrips from major US cities (Bilbao, Warsaw, Porto, Bologna,
+  // Koh Samui, Marrakech, Geneva, Manila...) — exactly the "outside the
+  // US" ask, not a coincidence given the site's whole focus.
+  {
+    name: "flightdeal",
+    label: "The Flight Deal (int'l flights)",
+    type: "rss",
+    url: "https://theflightdeal.com/feed/",
+  },
   { name: "free-games-cheapshark", label: "CheapShark (free games)", type: "cheapshark" },
   { name: "free-games-epic", label: "Epic Games (free games)", type: "epic" },
   { name: "keepa", label: "Keepa (Amazon price drops)", type: "keepa" },

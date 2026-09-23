@@ -1,7 +1,7 @@
 # Deal Finder
 
-A fast-scanning deal aggregator: one feed, pulling from 16 active sources
-(19 configured — 3 Reddit ones are built but currently disabled, see
+A fast-scanning deal aggregator: one feed, pulling from 17 active sources
+(20 configured — 3 Reddit ones are built but currently disabled, see
 Sources below), built for scanning quickly rather than passively waiting
 for Discord alerts. Dark theme, product thumbnails on every source. Also
 has a `/cards` page for finding underpriced sports card and Pokémon card
@@ -875,6 +875,7 @@ sources need no API key. The 9th (Keepa) needs your key, see below.
 | Slickdeals: More Categories | No | Clothing, shoes, kitchen, toys, beauty, pet, travel, collectibles, sneakers |
 | Slickdeals: Electronics | No | Headphones, chargers, tablets, general electronics |
 | Slickdeals: Video Games & Consoles | No | Games, consoles, related gear |
+| The Flight Deal (int'l flights) | No | US-city-to-international roundtrip flight deal alerts |
 | CheapShark | No | PC games currently $0 across Steam, GOG, Epic, etc. |
 | Epic Games Store | No | Epic's own free-game giveaways |
 | **Keepa** | **Yes** | Real Amazon price-drop search across their whole catalog |
@@ -969,6 +970,31 @@ own toggle. TechBargains was tried first and rejected — it sits behind a
 Cloudflare bot challenge (confirmed live, same as PriceCharting's own
 product pages elsewhere in this project), so no RSS feed is actually
 reachable from here.
+
+**The Flight Deal**, requested directly ("sometime next year I want to
+travel outside the United States and I would like to get the best
+possible deal"). Checked several dedicated travel-deal sites live before
+picking one, same standard as everything else here — confirmed real
+content, not assumed from reputation: `secretflying.com` sits behind a
+Cloudflare bot challenge, same dead end as TechBargains above; `
+thepointsguy.com/feed/` and `thriftytraveler.com/feed/` both resolve to
+real, working RSS, but turned out to be general blog/editorial feeds —
+credit card guides, "how to use Google Flights alerts," podcast
+episodes, a hiring post — zero of 10 sampled Thrifty Traveler items were
+an actual priced deal, so neither fits this app's "deal" format at all
+regardless of topical relevance. `theflightdeal.com/feed/` is the
+opposite: every item follows a strict "Airline: Origin – Destination.
+$Price (Basic Economy) / $Price (Regular Economy). Roundtrip, including
+all Taxes" format that `extractPrice` (`lib/sources/rss.ts`) parses
+cleanly with no changes needed, updates multiple times an hour, and — of
+16 live-sampled posts — 14 were international roundtrips from major US
+cities (Bilbao, Warsaw, Porto, Bologna, Koh Samui, Dublin, Marrakech,
+Geneva, Manila...), matching "outside the US" almost exactly, not a
+coincidence given the site's whole focus is US-outbound flight deal
+alerts. Left the existing `travel` keyword search inside More Categories
+in place rather than removing it — that one catches hotel/cruise/package
+deals a flight-specific feed never will, a different angle, not a
+redundant one.
 
 **Reddit (r/deals, r/GameDeals, r/buildapcsales) is fully built
 (`lib/sources/reddit.ts`, OAuth-based specifically because Reddit
