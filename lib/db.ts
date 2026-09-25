@@ -267,16 +267,19 @@ export type FavoriteCard = {
   itemWebUrl: string;
   imageUrl: string | null;
   condition: string | null;
-  category: CardCategory;
+  // Absent for an Electronics Search favorite — that source has no
+  // sports/Pokemon category concept at all.
+  category?: CardCategory;
   // The player/search term this listing was found under — Player
-  // Search's or Auction Sniper's own query box, so a later look back at
-  // favorites still shows what you were searching for when you starred it.
+  // Search's/Auction Sniper's/Electronics Search's own query box, so a
+  // later look back at favorites still shows what you were searching for
+  // when you starred it.
   searchedFor: string;
   favoritedAt: string;
   // Which feature this was starred from. Optional/absent on favorites
   // saved before Auction Sniper got its own star button — treat missing
   // as "player-search", the only source that existed then.
-  source?: "player-search" | "auction";
+  source?: "player-search" | "auction" | "electronics";
   // Auction-only snapshot fields, all optional since a Player Search
   // favorite never has them.
   bidCount?: number;
@@ -285,6 +288,12 @@ export type FavoriteCard = {
   endsAt?: string;
   estimatedProfitDollars?: number;
   reference?: ReferenceInfo;
+  // Electronics Search-only: there's no PriceCharting-style single
+  // product to link to (see `reference` above, which is PriceCharting-
+  // shaped), just a peer-asking-price average — kept as its own plain
+  // number instead of forcing it into `reference`'s shape.
+  peerAveragePriceDollars?: number;
+  peerCount?: number;
 };
 
 export async function getFavorites(): Promise<FavoriteCard[]> {

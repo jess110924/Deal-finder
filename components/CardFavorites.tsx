@@ -8,6 +8,7 @@ const CATEGORY_LABEL: Record<CardCategory, string> = { sports: "Sports", pokemon
 const SOURCE_LABEL: Record<NonNullable<FavoriteCard["source"]>, string> = {
   "player-search": "Player Search",
   auction: "Auction Sniper",
+  electronics: "Electronics Search",
 };
 
 export default function CardFavorites() {
@@ -53,9 +54,9 @@ export default function CardFavorites() {
           Favorites {favorites.length > 0 && `(${favorites.length})`}
         </h2>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Listings you&apos;ve starred from Player Search or Auction Sniper, saved as a snapshot of when
-          you starred them — the price, bid, or listing may have changed, ended, or sold since. Click
-          through to eBay to check the current status.
+          Listings you&apos;ve starred from Player Search, Auction Sniper, or Electronics Search, saved as
+          a snapshot of when you starred them — the price, bid, or listing may have changed, ended, or
+          sold since. Click through to eBay to check the current status.
         </p>
       </div>
 
@@ -67,8 +68,8 @@ export default function CardFavorites() {
 
       {!loading && favorites.length === 0 && (
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          Nothing starred yet — use the ☆ button on a listing in Player Search or an auction in Auction
-          Sniper above.
+          Nothing starred yet — use the ☆ button on a listing in Player Search, Auction Sniper, or
+          Electronics Search above.
         </p>
       )}
 
@@ -103,8 +104,8 @@ export default function CardFavorites() {
                 {fav.title}
               </a>
               <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                {SOURCE_LABEL[fav.source ?? "player-search"]} · {CATEGORY_LABEL[fav.category]} · Searched:{" "}
-                {fav.searchedFor || "—"}
+                {SOURCE_LABEL[fav.source ?? "player-search"]}
+                {fav.category && ` · ${CATEGORY_LABEL[fav.category]}`} · Searched: {fav.searchedFor || "—"}
                 {fav.condition && ` · ${fav.condition}`}
               </div>
               {fav.reference && (
@@ -117,6 +118,12 @@ export default function CardFavorites() {
                 >
                   vs ${fav.reference.ungradedPriceDollars.toFixed(2)} for &quot;{fav.reference.productName}&quot;
                 </a>
+              )}
+              {fav.peerAveragePriceDollars != null && (
+                <div className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
+                  vs ${fav.peerAveragePriceDollars.toFixed(2)} average asking price
+                  {fav.peerCount != null && ` (${fav.peerCount} peers)`} when starred
+                </div>
               )}
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                 <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>

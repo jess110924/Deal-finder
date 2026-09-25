@@ -178,9 +178,9 @@ export type SearchListingsOptions = {
   offset?: number;
 };
 
-export async function searchListings(
+async function rawSearchListings(
   query: string,
-  category: CardCategory,
+  categoryId: string | null,
   options: SearchListingsOptions = {}
 ): Promise<EbayListing[]> {
   const { limit = 30, minPriceDollars, maxPriceDollars, sort, offset = 0 } = options;
@@ -190,7 +190,7 @@ export async function searchListings(
   url.searchParams.set("q", query);
   url.searchParams.set("limit", String(limit));
   if (offset > 0) url.searchParams.set("offset", String(offset));
-  url.searchParams.set("category_ids", CATEGORY_ID_BY_CARD_CATEGORY[category]);
+  if (categoryId) url.searchParams.set("category_ids", categoryId);
   if (sort && sort !== "bestMatch") url.searchParams.set("sort", sort);
 
   // Buy It Now only — comparable single-item prices, not live auctions
@@ -218,6 +218,31 @@ export async function searchListings(
   const json = await res.json();
   const items: Record<string, unknown>[] = json?.itemSummaries ?? [];
   return items.map(mapItemSummary);
+}
+
+export async function searchListings(
+  query: string,
+  category: CardCategory,
+  options: SearchListingsOptions = {}
+): Promise<EbayListing[]> {
+  return rawSearchListings(query, CATEGORY_ID_BY_CARD_CATEGORY[category], options);
+}
+
+/**
+ * Same Buy It Now search as `searchListings`, with no category
+ * restriction at all — built for Electronics Search
+ * (lib/electronicsSearch.ts), which spans far more eBay categories
+ * (phones, watches, laptops, cameras...) than a fixed id list could
+ * reasonably cover. Confirmed live before deciding to leave category
+ * unset rather than guess one: a guessed "Consumer Electronics" id
+ * (293) returned zero results for a real "iPhone 14 Pro 128GB" search,
+ * while the same query with no category filter at all returned clean,
+ * correctly-categorized results (eBay's own categorization put them
+ * under "Cell Phones & Smartphones" on its own) — the free-text query
+ * does the targeting perfectly well without help.
+ */
+export async function searchAnyListings(query: string, options: SearchListingsOptions = {}): Promise<EbayListing[]> {
+  return rawSearchListings(query, null, options);
 }
 
 // "CCG Individual Cards" (183454) is not Pokemon-only — it's a shared

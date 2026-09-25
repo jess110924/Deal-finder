@@ -1081,6 +1081,120 @@ count. The feed also now shows that sales rank + sale count directly under
 each Keepa deal's title, so you can sanity-check it yourself without
 clicking through to Amazon.
 
+## /electronics — Electronics Search
+
+Requested directly: "locate iPhones, Apple Watches and any electronics
+cheaper than their average value so I can resell for profit." A
+separate page/nav tab (`app/electronics/page.tsx`,
+`components/ElectronicsSearch.tsx`, `lib/electronicsSearch.ts`,
+`app/api/electronics/search/route.ts`) rather than folded into `/cards`
+— electronics aren't trading cards, and there's no PriceCharting
+equivalent for them at all.
+
+**The reference price problem, and the choice made about it.** Trading
+cards have PriceCharting; general electronics have nothing comparable —
+no free, universal "true value" API for iPhones/Apple Watches/laptops/
+everything else. Two real options existed: (1) compare a listing against
+other *currently-listed* eBay asking prices for the same item, same
+technique Player Search already uses for cards (no new API, works
+today, but it's asking prices, not confirmed sales — same honest
+caveat Player Search already carries), or (2) look up the item's price
+via Keepa/Amazon (already integrated) as a more authoritative reference
+— rejected for this because it needs real product matching (UPC/ASIN-
+level) that eBay listing titles don't reliably carry, and Keepa's
+coverage is Amazon-specific, not "whatever's on eBay." Went with (1).
+
+**How a listing gets checked**, `evaluateListing` in
+`lib/electronicsSearch.ts`: search eBay again using the listing's own
+raw title (confirmed live this works well with no electronics-specific
+keyword extraction needed — real titles like "Apple iPhone 14 Pro 128GB
+Fully Unlocked - VERY GOOD Condition" are already structured enough that
+eBay's own search returns a tight, genuinely-comparable peer set on
+their own), average the peers' asking prices, and compare the listing's
+own price against that average via
+`estimateElectronicsResaleProfitDollars` (`lib/resaleProfit.ts`) — the
+same profit-after-fees math manual card search and Auction Sniper use,
+just with a peer average standing in for a PriceCharting reference.
+Below `MIN_PEERS_FOR_REFERENCE` (3) real peers, the average is treated
+as "not enough data" (`peerAveragePriceDollars: null`) rather than
+computed from too small a sample.
+
+**The listing's own itemId is explicitly excluded from its own peer
+set.** Without this, a listing worth flagging — priced unusually low —
+pulls its own low price into the very average it's compared against,
+making it look less underpriced than it actually is relative to the
+rest of the market. A subtle bug class specific to this peer-average
+approach that PriceCharting-based comparisons never had (a PriceCharting
+reference is independent of any one eBay listing).
+
+**eBay's selling fee varies meaningfully by category** — a real
+complication cards don't have, where one flat 13.25% rate covers the
+whole Trading Cards category. Live web search found Cell Phones &
+Smartphones specifically sits around 9%, general Consumer Electronics
+around 13.6-14.95%, and couldn't get a confident, distinctly-sourced
+number for Smart Watches specifically.
+`estimateElectronicsResaleProfitDollars` uses 13.6% (the general
+"most categories" rate as of the Feb 2025 fee update) as a single
+default across all of Electronics Search, deliberately the *higher*,
+more conservative of the numbers found — a wrong estimate should
+understate profit, never overstate it, so on an actual phone/watch
+listing (likely the lower ~9% bucket), real profit if resold is
+probably *better* than what's shown, never worse for this reason.
+
+**No eBay category restriction at all** — confirmed live before
+deciding this: a guessed "Consumer Electronics" category id (293)
+returned zero results for a real "iPhone 14 Pro 128GB" search, while the
+same query with no category filter returned clean, correctly-
+categorized results (eBay's own categorization put them under "Cell
+Phones & Smartphones" on its own). `searchAnyListings`, a new function
+in `lib/sources/ebay.ts` alongside the existing card-category-scoped
+`searchListings`, leaves `category_ids` unset entirely — free text does
+the targeting, which matters here since "electronics" spans far more
+eBay categories than a fixed id list could reasonably enumerate.
+
+**Two accuracy bugs caught live while testing this, both fixed before
+shipping:**
+
+- A "$56.12 OEM Pull Replacement OLED Screen - Repair Part for Apple
+  Watch Series 9" showed up as a "profitable" listing — a salvaged
+  screen, correctly priced like a screen, not an underpriced watch.
+  Matching the model name in a title doesn't mean it's the actual
+  device. Fixed with a title pattern (`repair part`, `replacement
+  part`, `oem pull`, `screen only`, `parts only`) applied to both the
+  main results and any listing's peer set, same as the existing
+  `isBundle`/broken-condition filters.
+- A real $530 iPhone 15 Pro got compared against a peer average of
+  $4,028 — one wildly-priced peer (a bulk/wholesale listing or a wrong
+  match; the exact listing wasn't reproducible after the fact, eBay's
+  live results shift between calls) that no title filter caught dragged
+  the whole average up enough to make an ordinary listing look
+  implausibly profitable. Rather than chase down that one listing's
+  exact wording — no regex enumerates every "this isn't a comparable
+  single unit" phrasing — `rejectPriceOutliers` now drops any peer
+  priced more than 4x away (either direction) from the peer group's own
+  *median* before averaging. Confirmed live afterward across four
+  different searches (iPhone 15 Pro, Apple Watch Series 9, iPhone 14
+  Pro, MacBook Air M2): every profitable result's price-to-peer-average
+  ratio landed in a sane 0.46-0.76 range, none of the "profit > 2x the
+  listing's own price" pattern that would flag a remaining skew.
+
+**Adjustable filters, repeat-search pagination, and favoriting all
+carried over from Auction Sniper/Player Search** rather than rebuilt
+from scratch, since this is the third feature built on the same shape
+this session: **Min profit** (default $0) and **Show at least N
+profitable** (default 25, auto-paging up to 4 eBay pages with honest
+`pagesSearched`/`reachedTarget` reporting), a **sort toggle** (highest
+profit first / price low-to-high), **search-again pagination** (repeat
+search with identical criteria pages forward through eBay's results
+instead of re-fetching the same batch), and a **star button** feeding
+the same shared Favorites list Player Search/Auction Sniper use
+(`FavoriteCard` in `lib/db.ts` gained `peerAveragePriceDollars`/
+`peerCount` fields and `"electronics"` as a third `source` value;
+`category` became optional on the type, since Electronics Search has no
+sports/Pokemon concept at all). `app/api/electronics/search/route.ts`
+sets `maxDuration = 60`, same reason as the other multi-page-capable
+routes.
+
 ## Using it efficiently
 
 - **Source pills** (top) toggle which sources are shown — click to turn a
@@ -1158,8 +1272,11 @@ site is wide open without it.
 - `app/api/cards/discover/route.ts`, `.github/workflows/discover-deals.yml` — the Discover run (schedule currently disabled)
 - `components/PlayerSearch.tsx`, `lib/playerSearch.ts` — price-banded player browse + peer-listing check
 - `app/api/cards/player-search/route.ts`, `app/api/cards/peer-check/route.ts` — their endpoints
-- `components/CardFavorites.tsx`, `app/api/cards/favorites/route.ts` — the shared star/favorite list (Player Search and Auction Sniper both feed it)
+- `components/CardFavorites.tsx`, `app/api/cards/favorites/route.ts` — the shared star/favorite list (Player Search, Auction Sniper, and Electronics Search all feed it)
 - `components/AuctionSnipe.tsx`, `lib/auctionSnipe.ts` — live auctions ending soonest, checked against PriceCharting
 - `app/api/cards/auctions/route.ts` — its endpoint
-- `lib/resaleProfit.ts` — estimated resale profit after eBay's real selling fee and shipping cost
+- `lib/resaleProfit.ts` — estimated resale profit after eBay's real selling fee and shipping cost (cards' 13.25% rate and Electronics Search's 13.6% rate are separate functions)
 - `lib/cardKeywords.ts` — rewrites a raw eBay title into a short, targeted search query (used for eBay's own keyword search only)
+- `app/electronics/page.tsx`, `components/ElectronicsSearch.tsx`, `lib/electronicsSearch.ts` — Electronics Search: any electronics vs. its own peer-asking-price average
+- `app/api/electronics/search/route.ts` — its endpoint
+- `lib/sources/ebay.ts`'s `searchAnyListings` — the category-unrestricted eBay search Electronics Search uses, alongside the card-category-scoped `searchListings`

@@ -13,7 +13,9 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const card = body as Omit<FavoriteCard, "favoritedAt">;
-    if (!card.itemId || !card.title || !card.itemWebUrl || !card.category || !card.searchedFor) {
+    // `category` is deliberately not required here — Electronics Search
+    // favorites have no sports/Pokemon category concept at all.
+    if (!card.itemId || !card.title || !card.itemWebUrl || !card.searchedFor) {
       return NextResponse.json({ error: "Missing required favorite fields." }, { status: 400 });
     }
     const favorites = await addFavorite(card);

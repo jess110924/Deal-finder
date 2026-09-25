@@ -35,6 +35,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <Link href="/cards" className="text-sm" style={{ color: "var(--text-secondary)" }}>
             Trading Cards
           </Link>
+          <Link href="/electronics" className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            Electronics
+          </Link>
         </header>
         <main className="flex-1 flex flex-col">{children}</main>
       </body>
