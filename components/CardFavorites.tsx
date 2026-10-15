@@ -9,7 +9,9 @@ const SOURCE_LABEL: Record<NonNullable<FavoriteCard["source"]>, string> = {
   "player-search": "Player Search",
   auction: "Auction Sniper",
   electronics: "Electronics Search",
+  "electronics-auction": "Electronics Auction Sniper",
 };
+const AUCTION_SOURCES: NonNullable<FavoriteCard["source"]>[] = ["auction", "electronics-auction"];
 
 export default function CardFavorites() {
   const [favorites, setFavorites] = useState<FavoriteCard[]>([]);
@@ -143,16 +145,18 @@ export default function CardFavorites() {
                 <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                   ${fav.priceDollars.toFixed(2)}
                 </span>
-                {fav.source === "auction" && fav.bidCount != null && (
+                {AUCTION_SOURCES.includes(fav.source ?? "player-search") && fav.bidCount != null && (
                   <span className="text-xs" style={{ color: "var(--text-muted)" }}>
                     {fav.bidCount} bid{fav.bidCount === 1 ? "" : "s"} when starred
                   </span>
                 )}
-                {fav.source === "auction" && fav.endsAt && new Date(fav.endsAt).getTime() < Date.now() && (
-                  <span className="text-xs font-semibold" style={{ color: "var(--critical)" }}>
-                    Likely ended
-                  </span>
-                )}
+                {AUCTION_SOURCES.includes(fav.source ?? "player-search") &&
+                  fav.endsAt &&
+                  new Date(fav.endsAt).getTime() < Date.now() && (
+                    <span className="text-xs font-semibold" style={{ color: "var(--critical)" }}>
+                      Likely ended
+                    </span>
+                  )}
                 <span className="text-xs" style={{ color: "var(--text-muted)" }}>
                   Starred {new Date(fav.favoritedAt).toLocaleDateString()}
                 </span>
@@ -168,7 +172,7 @@ export default function CardFavorites() {
               {fav.estimatedProfitDollars != null && (
                 <div className="text-sm font-semibold mt-1" style={{ color: "var(--good)" }}>
                   Est. profit when starred: ${fav.estimatedProfitDollars.toFixed(2)} after eBay fees
-                  {fav.source === "auction" ? ", if won at that bid" : ""}
+                  {AUCTION_SOURCES.includes(fav.source ?? "player-search") ? ", if won at that bid" : ""}
                 </div>
               )}
             </div>

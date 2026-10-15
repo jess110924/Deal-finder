@@ -1,99 +1,19 @@
 import { searchAnyListings, type EbayListing } from "@/lib/sources/ebay";
-import { fetchSoldComps, type SoldComp } from "@/lib/sources/soldComps";
-import { isBundle } from "@/lib/cardComparison";
+import { getElectronicsSoldPricing, isExcludedListing, buildSoldSearchUrl } from "@/lib/electronicsPricing";
 import { estimateElectronicsResaleProfitDollars } from "@/lib/resaleProfit";
 import { mapWithConcurrency } from "@/lib/concurrency";
 
-// eBay's own condition string for a broken/salvage item — confirmed live
-// as a real value the Browse API returns. Comparing a "for parts" price
-// against a working comp's sold price would call a genuinely broken item
-// "underpriced," which is backwards — it's cheap because it's broken,
-// not because it's a deal.
-const BROKEN_CONDITION_PATTERN = /for parts|not working/i;
-
-function isBrokenCondition(condition: string | null): boolean {
-  return condition != null && BROKEN_CONDITION_PATTERN.test(condition);
-}
-
-// Caught live (back when this compared against other asking prices, but
-// the same risk applies to sold comps): searching "Apple Watch Series 9"
-// surfaced a "$56.12 OEM Pull Replacement OLED Screen - Repair Part for
-// Apple Watch Series 9" as "profitable" — a salvaged screen, not a
-// watch, priced (correctly) like a screen, not underpriced at all. A
-// title match on the model name doesn't mean it's the actual device;
-// "repair part"/"OEM pull"/"screen only"/"for parts only" are all
-// phrasings that specifically mean "a piece removed from a device,"
-// never a complete, resellable unit. Filtered from both the listings
-// being evaluated and the sold comps a listing gets compared against.
-const PARTS_LISTING_PATTERN = /\b(repair part|replacement part|oem pull|screen only|parts only)\b/i;
-
-function isPartsListing(title: string): boolean {
-  return PARTS_LISTING_PATTERN.test(title);
-}
-
-function median(sortedAscending: number[]): number {
-  const mid = Math.floor(sortedAscending.length / 2);
-  return sortedAscending.length % 2 === 0
-    ? (sortedAscending[mid - 1] + sortedAscending[mid]) / 2
-    : sortedAscending[mid];
-}
-
-// A last safety net on top of the title/condition filters above, not a
-// replacement for them: no regex can enumerate every real phrasing for
-// "this isn't actually a comparable single unit" (bulk/wholesale lots,
-// business-account listings, an outright wrong match slipping through).
-// Caught live, back when this compared against other eBay asking prices:
-// a real $530 iPhone 15 Pro got compared against a peer average of
-// $4,028 — one wildly-priced peer that none of the title filters caught
-// dragged the whole average up enough to make an ordinary listing look
-// implausibly, wrongly profitable. The same risk exists for sold comps
-// (a mis-scraped or genuinely different sale slipping into the results),
-// so this stays: drops any comparable priced more than 4x away from the
-// group's own median (symmetric — a suspiciously *low* one, e.g. an
-// accessory-only sale mislabeled, would skew the average the other
-// direction) before computing the average actually used. 4x is
-// deliberately generous — wide enough to keep genuine condition/storage/
-// carrier price spread (confirmed live: a real iPhone 14 Pro comp set
-// spans roughly 1.5-2x low to high) without keeping something off by an
-// order of magnitude.
-const OUTLIER_MULTIPLE = 4;
-
-function rejectPriceOutliers<T>(items: T[], getPriceDollars: (item: T) => number): T[] {
-  const prices = items.map(getPriceDollars).sort((a, b) => a - b);
-  const med = median(prices);
-  if (med <= 0) return items;
-  return items.filter((item) => {
-    const price = getPriceDollars(item);
-    return price >= med / OUTLIER_MULTIPLE && price <= med * OUTLIER_MULTIPLE;
-  });
-}
-
-function buildSoldSearchUrl(title: string): string {
-  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(title)}&LH_Sold=1&LH_Complete=1`;
-}
-
 export type ElectronicsResult = EbayListing & {
   priceDollars: number;
-  // "What has this exact product actually sold for recently" —
-  // requested directly ("comparing against previous sold listings of
-  // the same exact product"), via SOLD_COMPS_API_KEY (a paid third-party
-  // scraper API; eBay's own API won't grant sold/completed-listing data
-  // without a restricted scope this app's key doesn't have). Null when
-  // fewer than MIN_COMPS_FOR_REFERENCE real comps were found — too few
-  // to average meaningfully, treated as "not enough data" rather than a
-  // guess, and deliberately NOT backed by a weaker fallback (e.g. active
-  // asking prices) when that happens — requested directly: sold comps
-  // only, so a profit number showing here always means a real sold
-  // price, never silently something else.
+  // See getElectronicsSoldPricing in lib/electronicsPricing.ts — null
+  // when there wasn't enough real sold history to trust, deliberately
+  // NOT backed by a weaker fallback (e.g. active asking prices) when
+  // that happens: requested directly, sold comps only, so a profit
+  // number showing here always means a real sold price, never silently
+  // something else.
   averageSoldPriceDollars: number | null;
   compCount: number;
-  // The most recent sale's date among the comps actually used, "YYYY-MM-DD" —
-  // null alongside averageSoldPriceDollars when there weren't enough.
   mostRecentSaleDate: string | null;
-  // eBay's own sold/completed-listings search for this title — the
-  // "verify this yourself" link, always populated regardless of whether
-  // enough comps were found, same role PriceCharting's productUrl plays
-  // for cards.
   soldSearchUrl: string;
   estimatedProfitDollars: number | null;
   isProfitable: boolean;
@@ -124,9 +44,6 @@ const MAX_LISTINGS_TO_EVALUATE = 12;
 // here has observed SOLD_COMPS_API_KEY rate-limiting, but there's also
 // no reason to find out the hard way with real money on the line.
 const LOOKUP_CONCURRENCY = 6;
-// Below this many real comps (after excluding bundles/broken/parts
-// listings and outliers), the average is too thin to trust.
-const MIN_COMPS_FOR_REFERENCE = 3;
 
 export const DEFAULT_MIN_ELECTRONICS_PROFIT_DOLLARS = 0;
 
@@ -142,61 +59,22 @@ export type ElectronicsSearchResult = {
   listings: ElectronicsResult[];
 };
 
-/**
- * Searches with the listing's full raw title, not a keyword-stripped
- * version — confirmed live (back in this project's trading-card sold-
- * comps era, same API) that this matters: the scraper API does its own
- * eBay-style relevance ranking, so a stripped-down query actually made
- * results *worse* in testing then. No reason to expect electronics
- * titles behave differently.
- */
 async function evaluateListing(listing: EbayListing, minProfitDollars: number): Promise<ElectronicsResult> {
   const priceDollars = listing.priceCents / 100;
-  const soldSearchUrl = buildSoldSearchUrl(listing.title);
+  const pricing = await getElectronicsSoldPricing(listing.title);
 
-  let comps: SoldComp[] = [];
-  try {
-    const rawComps = await fetchSoldComps(listing.title);
-    const filtered = rawComps.filter((c) => !isBundle(c.title) && !isBrokenCondition(c.condition) && !isPartsListing(c.title));
-    comps = rejectPriceOutliers(filtered, (c) => c.soldPriceDollars);
-  } catch {
-    comps = [];
+  if (pricing.averageSoldPriceDollars == null) {
+    return { ...listing, priceDollars, ...pricing, estimatedProfitDollars: null, isProfitable: false, wasChecked: true };
   }
 
-  if (comps.length < MIN_COMPS_FOR_REFERENCE) {
-    return {
-      ...listing,
-      priceDollars,
-      averageSoldPriceDollars: null,
-      compCount: comps.length,
-      mostRecentSaleDate: null,
-      soldSearchUrl,
-      estimatedProfitDollars: null,
-      isProfitable: false,
-      wasChecked: true,
-    };
-  }
-
-  const averageSoldPriceDollars = comps.reduce((sum, c) => sum + c.soldPriceDollars, 0) / comps.length;
-  const mostRecentSaleDate = [...comps].sort((a, b) => (a.endedAt < b.endedAt ? 1 : a.endedAt > b.endedAt ? -1 : 0))[0].endedAt;
   const estimatedProfitDollars = estimateElectronicsResaleProfitDollars(
     priceDollars,
     listing.shippingCents / 100,
-    averageSoldPriceDollars
+    pricing.averageSoldPriceDollars
   );
   const isProfitable = estimatedProfitDollars > minProfitDollars;
 
-  return {
-    ...listing,
-    priceDollars,
-    averageSoldPriceDollars,
-    compCount: comps.length,
-    mostRecentSaleDate,
-    soldSearchUrl,
-    estimatedProfitDollars,
-    isProfitable,
-    wasChecked: true,
-  };
+  return { ...listing, priceDollars, ...pricing, estimatedProfitDollars, isProfitable, wasChecked: true };
 }
 
 /**
@@ -237,7 +115,7 @@ export async function searchElectronics(
     maxPriceDollars,
     offset,
   });
-  const listings = rawListings.filter((l) => !isBundle(l.title) && !isBrokenCondition(l.condition) && !isPartsListing(l.title));
+  const listings = rawListings.filter((l) => !isExcludedListing(l.title, l.condition));
 
   const toEvaluate = listings.slice(0, MAX_LISTINGS_TO_EVALUATE);
   const toSkip = listings.slice(MAX_LISTINGS_TO_EVALUATE);

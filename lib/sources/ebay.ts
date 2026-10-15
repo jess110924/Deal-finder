@@ -141,9 +141,9 @@ function mapAuctionItemSummary(item: Record<string, unknown>): EbayAuctionListin
  * a current bid and time remaining are exactly the two things that must
  * be fresh for this to be useful for actually sniping something.
  */
-export async function searchAuctionListings(
+async function rawSearchAuctionListings(
   query: string,
-  category: CardCategory,
+  categoryId: string | null,
   limit = 30,
   offset = 0
 ): Promise<EbayAuctionListing[]> {
@@ -153,7 +153,7 @@ export async function searchAuctionListings(
   url.searchParams.set("q", query);
   url.searchParams.set("limit", String(limit));
   if (offset > 0) url.searchParams.set("offset", String(offset));
-  url.searchParams.set("category_ids", CATEGORY_ID_BY_CARD_CATEGORY[category]);
+  if (categoryId) url.searchParams.set("category_ids", categoryId);
   url.searchParams.set("filter", "buyingOptions:{AUCTION}");
   url.searchParams.set("sort", "endingSoonest");
 
@@ -168,6 +168,31 @@ export async function searchAuctionListings(
   const json = await res.json();
   const items: Record<string, unknown>[] = json?.itemSummaries ?? [];
   return items.map(mapAuctionItemSummary);
+}
+
+export async function searchAuctionListings(
+  query: string,
+  category: CardCategory,
+  limit = 30,
+  offset = 0
+): Promise<EbayAuctionListing[]> {
+  return rawSearchAuctionListings(query, CATEGORY_ID_BY_CARD_CATEGORY[category], limit, offset);
+}
+
+/**
+ * Same live-auction search as `searchAuctionListings`, with no category
+ * restriction — built for Electronics Auction Sniper
+ * (lib/electronicsAuctionSnipe.ts), same reasoning as
+ * `searchAnyListings` above: electronics spans far more eBay categories
+ * than a fixed id list could reasonably cover, and free text already
+ * targets the right one on its own.
+ */
+export async function searchAnyAuctionListings(
+  query: string,
+  limit = 30,
+  offset = 0
+): Promise<EbayAuctionListing[]> {
+  return rawSearchAuctionListings(query, null, limit, offset);
 }
 
 export type SearchListingsOptions = {

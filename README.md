@@ -1141,8 +1141,8 @@ Manually pressing Search again still pages forward through eBay's own
 free results one page at a time — a user-initiated, bounded cost each
 time, not an automatic loop.
 
-**How a listing gets checked**, `evaluateListing` in
-`lib/electronicsSearch.ts`: `fetchSoldComps` with the listing's own raw
+**How a listing gets checked**, `getElectronicsSoldPricing` in
+`lib/electronicsPricing.ts`: `fetchSoldComps` with the listing's own raw
 title (confirmed live in the card era this matters — the scraper API
 does its own eBay-style relevance ranking, and a stripped-down query
 made results *worse*), average the sold prices, and compare the
@@ -1154,7 +1154,12 @@ as "not enough data" (`averageSoldPriceDollars: null`) rather than
 computed from too small a sample. `soldSearchUrl` (eBay's own sold/
 completed-listings search for that title) is always populated regardless
 — the "verify this yourself" link, same role PriceCharting's productUrl
-plays for cards.
+plays for cards. Pulled into its own module (rather than living directly
+in `lib/electronicsSearch.ts`, where it started) once Electronics
+Auction Sniper (below) needed the exact same lookup and filters applied
+to a different price — a listing's asking price vs. an auction's current
+bid — so a fix to the matching/filtering logic applies to both instead
+of needing to be made twice.
 
 **eBay's selling fee varies meaningfully by category** — a real
 complication cards don't have, where one flat 13.25% rate covers the
@@ -1228,6 +1233,47 @@ has no sports/Pokemon concept at all. `app/api/electronics/search/route.ts`
 sets `maxDuration = 60` — up to `MAX_LISTINGS_TO_EVALUATE` sequential
 batches of a third-party API whose real latency hasn't been measured
 here, kept as a safety margin against Vercel's much shorter default.
+
+### Electronics Auction Sniper
+
+Requested directly: "catch ending auctions with potential profit" —
+the same workflow as the trading-card Auction Sniper
+(`lib/auctionSnipe.ts`), for electronics, on the same page
+(`components/ElectronicsAuctionSnipe.tsx`, `lib/electronicsAuctionSnipe.ts`,
+`app/api/electronics/auctions/route.ts`), checked against sold comps
+instead of PriceCharting. Everything about the comparison itself —
+`getElectronicsSoldPricing`, the parts-listing filter, the outlier
+rejection — is the exact same shared logic Electronics Search above
+uses, from `lib/electronicsPricing.ts`; only the price being compared
+differs (a listing's asking price vs. an auction's current bid, via
+`searchAnyAuctionListings`, a new category-unrestricted function in
+`lib/sources/ebay.ts` alongside the existing card-category-scoped
+`searchAuctionListings`).
+
+Same cost-conscious caps as Electronics Search, for the identical
+reason: `AUCTION_MAX_LISTINGS_TO_EVALUATE` (12, not the trading-card
+version's 25), `LOOKUP_CONCURRENCY` (6, not 12), and no "show at least
+N profitable" auto-paging — a search costs at most 12 sold-comps calls,
+full stop. The ending-time filter (15 minutes through 3 days), sort
+toggle (ending soonest / price low-to-high), and manual "search again"
+pagination (one page per click, no auto-loop) all carry over from the
+trading-card version unchanged — those don't touch the paid API, so
+there was no cost reason to trim them.
+
+Favoriting feeds the same shared list, with `"electronics-auction"` as
+a fourth `FavoriteCard` source — carries both an auction's snapshot
+fields (`bidCount`, `endsAt`) and Electronics Search's sold-comps fields
+(`averageSoldPriceDollars`, `compCount`, `mostRecentSaleDate`,
+`soldSearchUrl`) on the same favorite, something no single existing
+source needed both halves of before.
+
+Verified live: a real "iPhone 14 Pro 128GB" auction search found a
+genuinely profitable result — $271 current bid, ending in under 3
+hours, against a $418.73 real average sold price across 29 comps, for
+an estimated $90.38 profit if won at that bid — exactly the "ending
+soon and still underpriced" case sniping is built to catch, alongside
+several correctly-excluded results (bids already near or above the
+sold average, or too few comps to trust).
 
 ## Using it efficiently
 
@@ -1313,5 +1359,8 @@ site is wide open without it.
 - `lib/cardKeywords.ts` — rewrites a raw eBay title into a short, targeted search query (used for eBay's own keyword search only)
 - `app/electronics/page.tsx`, `components/ElectronicsSearch.tsx`, `lib/electronicsSearch.ts` — Electronics Search: any electronics vs. its own real sold-comps average
 - `app/api/electronics/search/route.ts` — its endpoint
-- `lib/sources/ebay.ts`'s `searchAnyListings` — the category-unrestricted eBay search Electronics Search uses, alongside the card-category-scoped `searchListings`
-- `lib/sources/soldComps.ts` — the sold-comps lookup (needs `SOLD_COMPS_API_KEY`), Electronics Search only
+- `lib/electronicsPricing.ts` — the sold-comps lookup + filters shared by Electronics Search and Electronics Auction Sniper
+- `components/ElectronicsAuctionSnipe.tsx`, `lib/electronicsAuctionSnipe.ts` — Electronics Auction Sniper: live electronics auctions vs. sold comps
+- `app/api/electronics/auctions/route.ts` — its endpoint
+- `lib/sources/ebay.ts`'s `searchAnyListings`/`searchAnyAuctionListings` — the category-unrestricted eBay searches Electronics Search/Electronics Auction Sniper use, alongside the card-category-scoped `searchListings`/`searchAuctionListings`
+- `lib/sources/soldComps.ts` — the sold-comps lookup (needs `SOLD_COMPS_API_KEY`), Electronics Search/Electronics Auction Sniper only

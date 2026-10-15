@@ -279,18 +279,20 @@ export type FavoriteCard = {
   // Which feature this was starred from. Optional/absent on favorites
   // saved before Auction Sniper got its own star button — treat missing
   // as "player-search", the only source that existed then.
-  source?: "player-search" | "auction" | "electronics";
-  // Auction-only snapshot fields, all optional since a Player Search
-  // favorite never has them.
+  source?: "player-search" | "auction" | "electronics" | "electronics-auction";
+  // Auction-only snapshot fields (both "auction" and "electronics-auction"),
+  // all optional since a Player Search/Electronics Search favorite never
+  // has them.
   bidCount?: number;
   // ISO datetime the auction was scheduled to close at the time it was
   // starred — a snapshot, not live; the auction may have already ended.
   endsAt?: string;
   estimatedProfitDollars?: number;
   reference?: ReferenceInfo;
-  // Electronics Search-only: there's no PriceCharting-style single
-  // product to link to (see `reference` above, which is PriceCharting-
-  // shaped) — this is a real sold-price average (SOLD_COMPS_API_KEY),
+  // Electronics Search/Electronics Auction Sniper only: there's no
+  // PriceCharting-style single product to link to (see `reference`
+  // above, which is PriceCharting-shaped) — this is a real sold-price
+  // average (SOLD_COMPS_API_KEY),
   // kept as its own plain number/date instead of forcing it into
   // `reference`'s shape. Named `averageSoldPriceDollars` (not
   // `peerAveragePriceDollars`, an earlier name from when Electronics
