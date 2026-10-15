@@ -50,6 +50,16 @@ Whichever environment runs the app needs its own copy of these (a local
 `.env` for `npm run dev`, Vercel's project environment variables for
 production).
 
+Electronics Search (`/electronics`) additionally needs:
+
+```
+SOLD_COMPS_API_KEY=your-sold-comps-key
+```
+
+A paid, metered third-party API (`api.sold-comps.com`) — see
+"/electronics — Electronics Search" below for the cost-conscious caps
+this is used under. Nothing else in the app needs this key.
+
 ### A brief detour through sold comps, and back
 
 This project spent a while comparing listings against real recent eBay
@@ -76,11 +86,17 @@ Auction Sniper (adapted to compare a live bid against PriceCharting's
 reference instead of sold comps, since it didn't exist before the
 sold-comps era and had no old version to revert to).
 
-**One thing worth knowing if the sold-comps subscription is still
-active:** nothing in this app calls that API anymore after this revert.
-If it was upgraded to a paid tier for this project specifically, that
-subscription can be downgraded or cancelled without breaking anything
-here.
+**Update: sold comps is back, scoped to one feature.** The note above
+("nothing calls that API anymore") held true for a while, but no
+longer — `lib/sources/soldComps.ts` was recreated when Electronics
+Search (see "/electronics — Electronics Search" below) was requested to
+compare against real sold prices instead of active asking prices. The
+card side of the app still doesn't use it, by choice, same as this
+section originally described; only Electronics Search does now, under
+the tighter, cost-conscious caps documented there. If the sold-comps
+subscription was ever downgraded or cancelled after reading the note
+above, `SOLD_COMPS_API_KEY` needs to be live again for Electronics
+Search to work.
 
 ### An important gotcha this was built around: pricecharting.com vs sportscardspro.com
 
@@ -1091,41 +1107,54 @@ separate page/nav tab (`app/electronics/page.tsx`,
 — electronics aren't trading cards, and there's no PriceCharting
 equivalent for them at all.
 
-**The reference price problem, and the choice made about it.** Trading
-cards have PriceCharting; general electronics have nothing comparable —
-no free, universal "true value" API for iPhones/Apple Watches/laptops/
-everything else. Two real options existed: (1) compare a listing against
-other *currently-listed* eBay asking prices for the same item, same
-technique Player Search already uses for cards (no new API, works
-today, but it's asking prices, not confirmed sales — same honest
-caveat Player Search already carries), or (2) look up the item's price
-via Keepa/Amazon (already integrated) as a more authoritative reference
-— rejected for this because it needs real product matching (UPC/ASIN-
-level) that eBay listing titles don't reliably carry, and Keepa's
-coverage is Amazon-specific, not "whatever's on eBay." Went with (1).
+**First version compared against other active eBay asking prices**
+(same technique Player Search uses for cards — no new API, but asking
+prices, not confirmed sales). **Upgraded shortly after, requested
+directly** ("comparing against previous sold listings of the same exact
+product"): `lib/sources/soldComps.ts` (`SOLD_COMPS_API_KEY`, a paid
+third-party scraper API — eBay's own API won't grant sold/completed-
+listing data without a restricted scope this app's key doesn't have)
+replaced the peer-average entirely, no fallback — a profit number here
+always means a real sold price, never silently something weaker when
+sold comps come up empty. This is the same API and raw client this
+project used once before, for trading cards, then removed (see "A brief
+detour through sold comps, and back" above); recreated here rather than
+reused as-is, since the card-era version had card-specific grading logic
+that doesn't apply to electronics.
+
+**This revisits a real cost history, and was scoped around it
+deliberately, requested directly.** The sold-comps era's watchlist
+check, capped at 5 listings/check, still projected ~7,200 calls/month
+for a single watched card against a 10,000/month paid tier. Electronics
+Search's free-text, any-electronics scope is far broader than one
+trading card, and its eBay-only predecessor evaluated up to 25 listings
+per page with auto-paging for a profit-count target — at sold-comps
+volume that could have burned through a budget in a handful of
+searches. So, before building this: per-search evaluation dropped from
+25 to 12 (matching manual card search's original cap), the "show at
+least N profitable" auto-paging feature was removed outright (no
+multi-page loop chasing a target — a search costs at most
+`MAX_LISTINGS_TO_EVALUATE` sold-comps calls, full stop), and lookup
+concurrency dropped from 12 to 6 (no observed rate-limiting on this key,
+just more caution with a paid API than the free eBay one gets).
+Manually pressing Search again still pages forward through eBay's own
+free results one page at a time — a user-initiated, bounded cost each
+time, not an automatic loop.
 
 **How a listing gets checked**, `evaluateListing` in
-`lib/electronicsSearch.ts`: search eBay again using the listing's own
-raw title (confirmed live this works well with no electronics-specific
-keyword extraction needed — real titles like "Apple iPhone 14 Pro 128GB
-Fully Unlocked - VERY GOOD Condition" are already structured enough that
-eBay's own search returns a tight, genuinely-comparable peer set on
-their own), average the peers' asking prices, and compare the listing's
-own price against that average via
+`lib/electronicsSearch.ts`: `fetchSoldComps` with the listing's own raw
+title (confirmed live in the card era this matters — the scraper API
+does its own eBay-style relevance ranking, and a stripped-down query
+made results *worse*), average the sold prices, and compare the
+listing's own price against that average via
 `estimateElectronicsResaleProfitDollars` (`lib/resaleProfit.ts`) — the
-same profit-after-fees math manual card search and Auction Sniper use,
-just with a peer average standing in for a PriceCharting reference.
-Below `MIN_PEERS_FOR_REFERENCE` (3) real peers, the average is treated
-as "not enough data" (`peerAveragePriceDollars: null`) rather than
-computed from too small a sample.
-
-**The listing's own itemId is explicitly excluded from its own peer
-set.** Without this, a listing worth flagging — priced unusually low —
-pulls its own low price into the very average it's compared against,
-making it look less underpriced than it actually is relative to the
-rest of the market. A subtle bug class specific to this peer-average
-approach that PriceCharting-based comparisons never had (a PriceCharting
-reference is independent of any one eBay listing).
+same profit-after-fees math manual card search and Auction Sniper use.
+Below `MIN_COMPS_FOR_REFERENCE` (3) real comps, the average is treated
+as "not enough data" (`averageSoldPriceDollars: null`) rather than
+computed from too small a sample. `soldSearchUrl` (eBay's own sold/
+completed-listings search for that title) is always populated regardless
+— the "verify this yourself" link, same role PriceCharting's productUrl
+plays for cards.
 
 **eBay's selling fee varies meaningfully by category** — a real
 complication cards don't have, where one flat 13.25% rate covers the
@@ -1146,14 +1175,18 @@ deciding this: a guessed "Consumer Electronics" category id (293)
 returned zero results for a real "iPhone 14 Pro 128GB" search, while the
 same query with no category filter returned clean, correctly-
 categorized results (eBay's own categorization put them under "Cell
-Phones & Smartphones" on its own). `searchAnyListings`, a new function
-in `lib/sources/ebay.ts` alongside the existing card-category-scoped
-`searchListings`, leaves `category_ids` unset entirely — free text does
-the targeting, which matters here since "electronics" spans far more
-eBay categories than a fixed id list could reasonably enumerate.
+Phones & Smartphones" on its own). `searchAnyListings`, a function in
+`lib/sources/ebay.ts` alongside the existing card-category-scoped
+`searchListings`, leaves `category_ids` unset entirely for the initial
+eBay browse (the free part of this — only the subsequent sold-comps
+lookup per listing is the paid part) — free text does the targeting,
+which matters here since "electronics" spans far more eBay categories
+than a fixed id list could reasonably enumerate.
 
-**Two accuracy bugs caught live while testing this, both fixed before
-shipping:**
+**Two accuracy bugs caught live while testing the original eBay-peer-
+average version, both still relevant and still fixed** (sold comps can
+contain the same kinds of noise a scraper pulling real eBay sold history
+would also pick up):
 
 - A "$56.12 OEM Pull Replacement OLED Screen - Repair Part for Apple
   Watch Series 9" showed up as a "profitable" listing — a salvaged
@@ -1161,39 +1194,40 @@ shipping:**
   Matching the model name in a title doesn't mean it's the actual
   device. Fixed with a title pattern (`repair part`, `replacement
   part`, `oem pull`, `screen only`, `parts only`) applied to both the
-  main results and any listing's peer set, same as the existing
-  `isBundle`/broken-condition filters.
+  listings being evaluated and the sold comps they're compared against,
+  same as the existing `isBundle`/broken-condition filters — confirmed
+  live post-sold-comps-switch that a raw "Parts Only" / "Broken..."
+  sale really does show up in real sold history for a popular search,
+  so this filter still earns its keep.
 - A real $530 iPhone 15 Pro got compared against a peer average of
-  $4,028 — one wildly-priced peer (a bulk/wholesale listing or a wrong
-  match; the exact listing wasn't reproducible after the fact, eBay's
-  live results shift between calls) that no title filter caught dragged
+  $4,028 — one wildly-priced peer that no title filter caught dragged
   the whole average up enough to make an ordinary listing look
   implausibly profitable. Rather than chase down that one listing's
   exact wording — no regex enumerates every "this isn't a comparable
-  single unit" phrasing — `rejectPriceOutliers` now drops any peer
-  priced more than 4x away (either direction) from the peer group's own
-  *median* before averaging. Confirmed live afterward across four
-  different searches (iPhone 15 Pro, Apple Watch Series 9, iPhone 14
-  Pro, MacBook Air M2): every profitable result's price-to-peer-average
-  ratio landed in a sane 0.46-0.76 range, none of the "profit > 2x the
-  listing's own price" pattern that would flag a remaining skew.
+  single unit" phrasing — `rejectPriceOutliers` drops any comparable
+  priced more than 4x away (either direction) from the group's own
+  *median* before averaging. Kept, generalized to work over sold comps'
+  prices the same way it worked over peer listings' prices before.
 
-**Adjustable filters, repeat-search pagination, and favoriting all
-carried over from Auction Sniper/Player Search** rather than rebuilt
-from scratch, since this is the third feature built on the same shape
-this session: **Min profit** (default $0) and **Show at least N
-profitable** (default 25, auto-paging up to 4 eBay pages with honest
-`pagesSearched`/`reachedTarget` reporting), a **sort toggle** (highest
-profit first / price low-to-high), **search-again pagination** (repeat
-search with identical criteria pages forward through eBay's results
-instead of re-fetching the same batch), and a **star button** feeding
-the same shared Favorites list Player Search/Auction Sniper use
-(`FavoriteCard` in `lib/db.ts` gained `peerAveragePriceDollars`/
-`peerCount` fields and `"electronics"` as a third `source` value;
-`category` became optional on the type, since Electronics Search has no
-sports/Pokemon concept at all). `app/api/electronics/search/route.ts`
-sets `maxDuration = 60`, same reason as the other multi-page-capable
-routes.
+**Adjustable filters, repeat-search pagination, and favoriting carried
+over from Auction Sniper/Player Search**, trimmed to fit the cost
+constraints above: **Min profit** (default $0) stayed; **Show at least
+N profitable** did not (see the cost section above) — a **sort toggle**
+(highest profit first / price low-to-high), **search-again pagination**
+(repeat search with identical criteria pages forward through eBay's
+results instead of re-fetching the same batch, one page at a time), and
+a **star button** feeding the same shared Favorites list Player Search/
+Auction Sniper use. `FavoriteCard` in `lib/db.ts` carries
+`averageSoldPriceDollars`/`compCount`/`mostRecentSaleDate`/
+`soldSearchUrl` for an electronics favorite (renamed from
+`peerAveragePriceDollars`/`peerCount`, the eBay-peer-average version's
+field names — a favorite saved under the old names just won't show that
+line anymore, same as any other optional snapshot field from before it
+existed); `category` is optional on the type, since Electronics Search
+has no sports/Pokemon concept at all. `app/api/electronics/search/route.ts`
+sets `maxDuration = 60` — up to `MAX_LISTINGS_TO_EVALUATE` sequential
+batches of a third-party API whose real latency hasn't been measured
+here, kept as a safety margin against Vercel's much shorter default.
 
 ## Using it efficiently
 
@@ -1277,6 +1311,7 @@ site is wide open without it.
 - `app/api/cards/auctions/route.ts` — its endpoint
 - `lib/resaleProfit.ts` — estimated resale profit after eBay's real selling fee and shipping cost (cards' 13.25% rate and Electronics Search's 13.6% rate are separate functions)
 - `lib/cardKeywords.ts` — rewrites a raw eBay title into a short, targeted search query (used for eBay's own keyword search only)
-- `app/electronics/page.tsx`, `components/ElectronicsSearch.tsx`, `lib/electronicsSearch.ts` — Electronics Search: any electronics vs. its own peer-asking-price average
+- `app/electronics/page.tsx`, `components/ElectronicsSearch.tsx`, `lib/electronicsSearch.ts` — Electronics Search: any electronics vs. its own real sold-comps average
 - `app/api/electronics/search/route.ts` — its endpoint
 - `lib/sources/ebay.ts`'s `searchAnyListings` — the category-unrestricted eBay search Electronics Search uses, alongside the card-category-scoped `searchListings`
+- `lib/sources/soldComps.ts` — the sold-comps lookup (needs `SOLD_COMPS_API_KEY`), Electronics Search only

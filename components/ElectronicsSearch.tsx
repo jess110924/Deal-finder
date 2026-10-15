@@ -11,8 +11,12 @@ const SORT_OPTIONS = [
 // Matches FETCH_LIMIT in lib/electronicsSearch.ts — same repeat-search-
 // pages-forward mechanism as Auction Sniper/Player Search
 // (components/AuctionSnipe.tsx, components/PlayerSearch.tsx); see those
-// files' comments for the full reasoning, identical here.
-const PAGE_SIZE = 50;
+// files' comments for the full reasoning. Unlike those, there's no
+// automatic multi-page search toward a profit-count target here — each
+// Search click (including a repeat one) costs at most one page's worth
+// of sold-comps lookups, never a multiple of that, given
+// SOLD_COMPS_API_KEY is a paid, metered API.
+const PAGE_SIZE = 30;
 const MAX_OFFSET = PAGE_SIZE * 8;
 
 export default function ElectronicsSearch() {
@@ -21,13 +25,10 @@ export default function ElectronicsSearch() {
   const [maxPrice, setMaxPrice] = useState("");
   const [sortBy, setSortBy] = useState<"profit" | "price">("profit");
   const [minProfit, setMinProfit] = useState("0");
-  const [minProfitable, setMinProfitable] = useState("25");
   const [listings, setListings] = useState<ElectronicsResult[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
-  const [lastPagesSearched, setLastPagesSearched] = useState(1);
-  const [reachedTarget, setReachedTarget] = useState(true);
   const lastSearchKeyRef = useRef<string | null>(null);
   const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
   const [favoritingIds, setFavoritingIds] = useState<Set<string>>(new Set());
@@ -72,8 +73,10 @@ export default function ElectronicsSearch() {
               searchedFor: query.trim(),
               source: "electronics",
               estimatedProfitDollars: listing.estimatedProfitDollars ?? undefined,
-              peerAveragePriceDollars: listing.peerAveragePriceDollars ?? undefined,
-              peerCount: listing.peerCount,
+              averageSoldPriceDollars: listing.averageSoldPriceDollars ?? undefined,
+              compCount: listing.compCount,
+              mostRecentSaleDate: listing.mostRecentSaleDate ?? undefined,
+              soldSearchUrl: listing.soldSearchUrl,
             }),
           });
       if (!res.ok) {
@@ -99,14 +102,13 @@ export default function ElectronicsSearch() {
 
   // Same "search again for new results" mechanism as Auction Sniper/
   // Player Search — pressing Search again with the exact same criteria
-  // moves forward by however many pages the last search consumed;
-  // changing any field resets to the start.
+  // moves forward one page; changing any field resets to the start.
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
 
-    const searchKey = JSON.stringify({ q: query.trim(), minPrice, maxPrice, sortBy, minProfit, minProfitable });
-    const nextOffset = lastSearchKeyRef.current === searchKey ? (offset + lastPagesSearched * PAGE_SIZE) % MAX_OFFSET : 0;
+    const searchKey = JSON.stringify({ q: query.trim(), minPrice, maxPrice, sortBy, minProfit });
+    const nextOffset = lastSearchKeyRef.current === searchKey ? (offset + PAGE_SIZE) % MAX_OFFSET : 0;
     lastSearchKeyRef.current = searchKey;
     setOffset(nextOffset);
 
@@ -122,16 +124,10 @@ export default function ElectronicsSearch() {
       if (minProfit.trim() && Number.isFinite(minProfitNum) && minProfitNum >= 0) {
         params.set("minProfit", String(minProfitNum));
       }
-      const minProfitableNum = Number(minProfitable);
-      if (minProfitable.trim() && Number.isFinite(minProfitableNum) && minProfitableNum > 0) {
-        params.set("minProfitable", String(Math.floor(minProfitableNum)));
-      }
       const res = await fetch(`/api/electronics/search?${params}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed: ${res.status}`);
       setListings(json.listings ?? []);
-      setLastPagesSearched(json.pagesSearched ?? 1);
-      setReachedTarget(json.reachedTarget ?? true);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -154,11 +150,11 @@ export default function ElectronicsSearch() {
         </h2>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
           Search any electronics — iPhones, Apple Watches, laptops, whatever — and each listing gets
-          checked against its own peer group: other currently-listed items matching that same title.
-          There&apos;s no PriceCharting-style price guide for electronics, so this is an average asking
-          price, not a confirmed sold price, same caveat Player Search&apos;s peer-check carries for
-          cards. Only listings meeting &quot;Min profit&quot; are shown. Star (★) any listing to save it
-          to Favorites below.
+          checked against real recent sold prices for that same title, not just other active listings.
+          Only listings meeting &quot;Min profit&quot; are shown. Checking against sold history uses a
+          paid, metered API, so this is capped tighter than the rest of this site&apos;s eBay-only
+          searches — up to 12 listings checked per search, no automatic deeper search for a target
+          profitable count. Star (★) any listing to save it to Favorites below.
         </p>
       </div>
 
@@ -168,7 +164,7 @@ export default function ElectronicsSearch() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="e.g. iPhone 14 Pro 128GB, Apple Watch Series 9"
+            placeholder="e.g. iPhone 15 Pro Max 256GB Unlocked"
             className="w-full rounded-md pl-3 pr-8 py-2 text-sm"
             style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
           />
@@ -234,24 +230,6 @@ export default function ElectronicsSearch() {
             style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
           />
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Show at least
-          </span>
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={minProfitable}
-            onChange={(e) => setMinProfitable(e.target.value)}
-            placeholder="1 page"
-            className="w-16 rounded-md px-2 py-2 text-sm"
-            style={{ border: "1px solid var(--border-hairline)", background: "var(--surface-1)", color: "var(--text-primary)" }}
-          />
-          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-            profitable
-          </span>
-        </div>
         <button
           type="submit"
           disabled={loading}
@@ -261,13 +239,6 @@ export default function ElectronicsSearch() {
           {loading ? "Searching…" : "Search"}
         </button>
       </form>
-
-      {loading && minProfitable.trim() && Number(minProfitable) > 0 && (
-        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-          Checking further pages of eBay&apos;s results to find {minProfitable} profitable listings — this
-          can take longer than a single-page search.
-        </p>
-      )}
 
       {error && (
         <div className="rounded-md px-3 py-2 text-sm" style={{ color: "var(--critical)" }}>
@@ -292,14 +263,7 @@ export default function ElectronicsSearch() {
           {listings.length > 0 && (
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
               {listings.length} listing{listings.length === 1 ? "" : "s"} found · {checked.length} checked
-              against peer prices · {profitable.length} profitable
-              {lastPagesSearched > 1 && ` (searched ${lastPagesSearched} pages of eBay's results)`}.
-              {!reachedTarget && minProfitable.trim() && (
-                <>
-                  {" "}Fewer than the {minProfitable} you asked for — that may be all there are right now
-                  for this search.
-                </>
-              )}
+              against sold comps · {profitable.length} profitable.
             </p>
           )}
           {listings.length === 0 && (
@@ -310,10 +274,9 @@ export default function ElectronicsSearch() {
           )}
           {listings.length > 0 && profitable.length === 0 && (
             <p className="text-sm py-8 text-center" style={{ color: "var(--text-muted)" }}>
-              No profitable listings found — {checked.length} checked across {lastPagesSearched} page
-              {lastPagesSearched === 1 ? "" : "s"} of eBay&apos;s results, {listings.length - checked.length}{" "}
-              not checked (past the per-page 25-listing cap). Search again with the same criteria to
-              check further pages.
+              No profitable listings found — {checked.length} checked, {listings.length - checked.length} not
+              checked (past the 12-listing cap). Search again with the same criteria to check a different
+              batch.
             </p>
           )}
           {profitable.map((listing) => (
@@ -356,11 +319,17 @@ export default function ElectronicsSearch() {
                       {listing.condition}
                     </div>
                   )}
-                  {listing.peerAveragePriceDollars != null && (
-                    <div className="text-xs mt-0.5" style={{ color: "var(--series-1)" }}>
-                      vs ${listing.peerAveragePriceDollars.toFixed(2)} average asking price ({listing.peerCount}{" "}
-                      peers)
-                    </div>
+                  {listing.averageSoldPriceDollars != null && (
+                    <a
+                      href={listing.soldSearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs block mt-0.5"
+                      style={{ color: "var(--series-1)", textDecoration: "underline" }}
+                    >
+                      vs ${listing.averageSoldPriceDollars.toFixed(2)} average sold price ({listing.compCount}{" "}
+                      sales{listing.mostRecentSaleDate && `, most recent ${listing.mostRecentSaleDate}`})
+                    </a>
                   )}
                 </div>
                 <span className="font-semibold tabular-nums shrink-0" style={{ color: "var(--text-primary)" }}>

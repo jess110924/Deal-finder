@@ -1,11 +1,12 @@
 import { searchAnyListings, type EbayListing } from "@/lib/sources/ebay";
+import { fetchSoldComps, type SoldComp } from "@/lib/sources/soldComps";
 import { isBundle } from "@/lib/cardComparison";
 import { estimateElectronicsResaleProfitDollars } from "@/lib/resaleProfit";
 import { mapWithConcurrency } from "@/lib/concurrency";
 
 // eBay's own condition string for a broken/salvage item — confirmed live
 // as a real value the Browse API returns. Comparing a "for parts" price
-// against working peers' average would call a genuinely broken item
+// against a working comp's sold price would call a genuinely broken item
 // "underpriced," which is backwards — it's cheap because it's broken,
 // not because it's a deal.
 const BROKEN_CONDITION_PATTERN = /for parts|not working/i;
@@ -14,15 +15,16 @@ function isBrokenCondition(condition: string | null): boolean {
   return condition != null && BROKEN_CONDITION_PATTERN.test(condition);
 }
 
-// Caught live: searching "Apple Watch Series 9" surfaced a "$56.12 OEM
-// Pull Replacement OLED Screen - Repair Part for Apple Watch Series 9"
-// as "profitable" — a salvaged screen, not a watch, priced (correctly)
-// like a screen, not underpriced at all. A title match on the model
-// name doesn't mean it's the actual device; "repair part"/"OEM pull"/
-// "screen only"/"for parts only" are all phrasings that specifically
-// mean "a piece removed from a device," never a complete, resellable
-// unit. Filtered from both the main results and the peer set a listing
-// gets compared against, same as isBundle/isBrokenCondition above.
+// Caught live (back when this compared against other asking prices, but
+// the same risk applies to sold comps): searching "Apple Watch Series 9"
+// surfaced a "$56.12 OEM Pull Replacement OLED Screen - Repair Part for
+// Apple Watch Series 9" as "profitable" — a salvaged screen, not a
+// watch, priced (correctly) like a screen, not underpriced at all. A
+// title match on the model name doesn't mean it's the actual device;
+// "repair part"/"OEM pull"/"screen only"/"for parts only" are all
+// phrasings that specifically mean "a piece removed from a device,"
+// never a complete, resellable unit. Filtered from both the listings
+// being evaluated and the sold comps a listing gets compared against.
 const PARTS_LISTING_PATTERN = /\b(repair part|replacement part|oem pull|screen only|parts only)\b/i;
 
 function isPartsListing(title: string): boolean {
@@ -40,62 +42,91 @@ function median(sortedAscending: number[]): number {
 // replacement for them: no regex can enumerate every real phrasing for
 // "this isn't actually a comparable single unit" (bulk/wholesale lots,
 // business-account listings, an outright wrong match slipping through).
-// Caught live: a real $530 iPhone 15 Pro got compared against a peer
-// average of $4,028 — one wildly-priced peer that none of the title
-// filters caught dragged the whole average up enough to make an
-// ordinary listing look implausibly, wrongly profitable. Rather than
-// chase that one specific listing's exact wording, this rejects any
-// peer priced more than 4x away from the peer group's own median
-// (symmetric — a suspiciously *low* peer, e.g. an accessory-only
-// listing mislabeled, would skew the average the other direction) before
-// computing the average actually used. 4x is deliberately generous —
-// wide enough to keep genuine condition/storage/carrier price spread
-// (confirmed live: a real iPhone 14 Pro peer set spans roughly 1.5-2x
-// low to high) without keeping a listing that's off by an order of
-// magnitude.
+// Caught live, back when this compared against other eBay asking prices:
+// a real $530 iPhone 15 Pro got compared against a peer average of
+// $4,028 — one wildly-priced peer that none of the title filters caught
+// dragged the whole average up enough to make an ordinary listing look
+// implausibly, wrongly profitable. The same risk exists for sold comps
+// (a mis-scraped or genuinely different sale slipping into the results),
+// so this stays: drops any comparable priced more than 4x away from the
+// group's own median (symmetric — a suspiciously *low* one, e.g. an
+// accessory-only sale mislabeled, would skew the average the other
+// direction) before computing the average actually used. 4x is
+// deliberately generous — wide enough to keep genuine condition/storage/
+// carrier price spread (confirmed live: a real iPhone 14 Pro comp set
+// spans roughly 1.5-2x low to high) without keeping something off by an
+// order of magnitude.
 const OUTLIER_MULTIPLE = 4;
 
-function rejectPriceOutliers(peers: EbayListing[]): EbayListing[] {
-  const prices = peers.map((p) => p.priceCents / 100).sort((a, b) => a - b);
+function rejectPriceOutliers<T>(items: T[], getPriceDollars: (item: T) => number): T[] {
+  const prices = items.map(getPriceDollars).sort((a, b) => a - b);
   const med = median(prices);
-  if (med <= 0) return peers;
-  return peers.filter((p) => {
-    const price = p.priceCents / 100;
+  if (med <= 0) return items;
+  return items.filter((item) => {
+    const price = getPriceDollars(item);
     return price >= med / OUTLIER_MULTIPLE && price <= med * OUTLIER_MULTIPLE;
   });
 }
 
+function buildSoldSearchUrl(title: string): string {
+  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(title)}&LH_Sold=1&LH_Complete=1`;
+}
+
 export type ElectronicsResult = EbayListing & {
   priceDollars: number;
-  // The average asking price among OTHER currently-listed items matching
-  // this one's own title — there's no PriceCharting-style "true value"
-  // API for general electronics, so (requested directly, same technique
-  // Player Search already uses for cards) this is a peer-asking-price
-  // average, not a confirmed sold price. Null when fewer than
-  // MIN_PEERS_FOR_REFERENCE real peers were found — too few to average
-  // meaningfully, treated as "not enough data" rather than a guess.
-  peerAveragePriceDollars: number | null;
-  peerCount: number;
+  // "What has this exact product actually sold for recently" —
+  // requested directly ("comparing against previous sold listings of
+  // the same exact product"), via SOLD_COMPS_API_KEY (a paid third-party
+  // scraper API; eBay's own API won't grant sold/completed-listing data
+  // without a restricted scope this app's key doesn't have). Null when
+  // fewer than MIN_COMPS_FOR_REFERENCE real comps were found — too few
+  // to average meaningfully, treated as "not enough data" rather than a
+  // guess, and deliberately NOT backed by a weaker fallback (e.g. active
+  // asking prices) when that happens — requested directly: sold comps
+  // only, so a profit number showing here always means a real sold
+  // price, never silently something else.
+  averageSoldPriceDollars: number | null;
+  compCount: number;
+  // The most recent sale's date among the comps actually used, "YYYY-MM-DD" —
+  // null alongside averageSoldPriceDollars when there weren't enough.
+  mostRecentSaleDate: string | null;
+  // eBay's own sold/completed-listings search for this title — the
+  // "verify this yourself" link, always populated regardless of whether
+  // enough comps were found, same role PriceCharting's productUrl plays
+  // for cards.
+  soldSearchUrl: string;
   estimatedProfitDollars: number | null;
   isProfitable: boolean;
   wasChecked: boolean;
 };
 
-// Same reasoning and values as Auction Sniper/Player Search
-// (lib/auctionSnipe.ts, lib/playerSearch.ts) — no per-request billing
-// concern for eBay's own API the way PriceCharting/sold-comps had, and a
-// bound on total lookups per search is still needed to stay within
-// Vercel's request timeout.
-const FETCH_LIMIT = 50;
-const MAX_LISTINGS_TO_EVALUATE = 25;
-const MAX_PAGES_PER_SEARCH = 4;
-const LOOKUP_CONCURRENCY = 12;
-// Below this many real peers (after excluding the listing itself and any
-// broken/bundle peers), the average is too thin to trust — confirmed
-// live that a tight, specific query (an exact model/storage/color) can
-// still turn up 20-30 peers, so requiring a few is a real filter, not
-// one that starves every search.
-const MIN_PEERS_FOR_REFERENCE = 3;
+// Deliberately much tighter than Auction Sniper/Player Search's eBay-
+// only caps (lib/auctionSnipe.ts, lib/playerSearch.ts) — those call
+// eBay's own free Browse API per listing; this calls SOLD_COMPS_API_KEY,
+// a paid, metered third-party API. Requested directly after flagging
+// this project's own cost history: the sold-comps era's watchlist
+// check, capped at 5 listings/check, still projected ~7,200 calls/month
+// for a single watched card — Electronics Search's free-text, any-
+// electronics scope is far broader than one card, so the per-search cap
+// here matches manual card search's original SEARCH_MAX_LISTINGS_TO_EVALUATE
+// (12) instead of the 25 the eBay-only version of this file used. No
+// multi-page auto-search for a "show at least N profitable" target
+// either (that feature existed in the eBay-peer-average version of this
+// file; removed here, same reasoning) — each search costs at most
+// MAX_LISTINGS_TO_EVALUATE sold-comps calls, full stop, not a multiple
+// of that chasing a target count. Manually pressing Search again still
+// pages forward through eBay's own (free) results, see `offset` below —
+// that's a user-initiated, bounded cost each time, not an automatic loop.
+const FETCH_LIMIT = 30;
+const MAX_LISTINGS_TO_EVALUATE = 12;
+// Lower than the eBay-only pages' LOOKUP_CONCURRENCY (12) — same "be
+// cautious with a paid API" reasoning as the lookup cap above; nothing
+// here has observed SOLD_COMPS_API_KEY rate-limiting, but there's also
+// no reason to find out the hard way with real money on the line.
+const LOOKUP_CONCURRENCY = 6;
+// Below this many real comps (after excluding bundles/broken/parts
+// listings and outliers), the average is too thin to trust.
+const MIN_COMPS_FOR_REFERENCE = 3;
 
 export const DEFAULT_MIN_ELECTRONICS_PROFIT_DOLLARS = 0;
 
@@ -105,127 +136,88 @@ export type ElectronicsSearchOptions = {
   sortBy?: "profit" | "price";
   offset?: number;
   minProfitDollars?: number;
-  minProfitableTarget?: number;
 };
 
 export type ElectronicsSearchResult = {
   listings: ElectronicsResult[];
-  pagesSearched: number;
-  reachedTarget: boolean;
 };
 
 /**
- * Peers found by searching eBay again with this listing's own raw
- * title — confirmed live this works well without any electronics-
- * specific keyword extraction (unlike cards' extractSearchKeywords):
- * real listing titles are already fairly structured ("Apple iPhone 14
- * Pro 128GB Fully Unlocked - VERY GOOD Condition") and eBay's own search
- * returns a tight, genuinely-comparable set of other listings for the
- * same model/storage/condition tier. The listing's own itemId is
- * explicitly excluded from its own peer set — without this, a very
- * cheap listing (exactly the kind worth flagging) pulls its own low
- * price into the average that then gets compared against it, making it
- * look less underpriced than it really is relative to the rest of the
- * market.
+ * Searches with the listing's full raw title, not a keyword-stripped
+ * version — confirmed live (back in this project's trading-card sold-
+ * comps era, same API) that this matters: the scraper API does its own
+ * eBay-style relevance ranking, so a stripped-down query actually made
+ * results *worse* in testing then. No reason to expect electronics
+ * titles behave differently.
  */
 async function evaluateListing(listing: EbayListing, minProfitDollars: number): Promise<ElectronicsResult> {
   const priceDollars = listing.priceCents / 100;
+  const soldSearchUrl = buildSoldSearchUrl(listing.title);
 
-  let peers: EbayListing[] = [];
+  let comps: SoldComp[] = [];
   try {
-    const rawPeers = await searchAnyListings(listing.title, { limit: 30 });
-    const filtered = rawPeers.filter(
-      (p) => p.itemId !== listing.itemId && !isBundle(p.title) && !isBrokenCondition(p.condition) && !isPartsListing(p.title)
-    );
-    peers = rejectPriceOutliers(filtered);
+    const rawComps = await fetchSoldComps(listing.title);
+    const filtered = rawComps.filter((c) => !isBundle(c.title) && !isBrokenCondition(c.condition) && !isPartsListing(c.title));
+    comps = rejectPriceOutliers(filtered, (c) => c.soldPriceDollars);
   } catch {
-    peers = [];
+    comps = [];
   }
 
-  if (peers.length < MIN_PEERS_FOR_REFERENCE) {
+  if (comps.length < MIN_COMPS_FOR_REFERENCE) {
     return {
       ...listing,
       priceDollars,
-      peerAveragePriceDollars: null,
-      peerCount: peers.length,
+      averageSoldPriceDollars: null,
+      compCount: comps.length,
+      mostRecentSaleDate: null,
+      soldSearchUrl,
       estimatedProfitDollars: null,
       isProfitable: false,
       wasChecked: true,
     };
   }
 
-  const peerAveragePriceDollars = peers.reduce((sum, p) => sum + p.priceCents / 100, 0) / peers.length;
+  const averageSoldPriceDollars = comps.reduce((sum, c) => sum + c.soldPriceDollars, 0) / comps.length;
+  const mostRecentSaleDate = [...comps].sort((a, b) => (a.endedAt < b.endedAt ? 1 : a.endedAt > b.endedAt ? -1 : 0))[0].endedAt;
   const estimatedProfitDollars = estimateElectronicsResaleProfitDollars(
     priceDollars,
     listing.shippingCents / 100,
-    peerAveragePriceDollars
+    averageSoldPriceDollars
   );
   const isProfitable = estimatedProfitDollars > minProfitDollars;
 
   return {
     ...listing,
     priceDollars,
-    peerAveragePriceDollars,
-    peerCount: peers.length,
+    averageSoldPriceDollars,
+    compCount: comps.length,
+    mostRecentSaleDate,
+    soldSearchUrl,
     estimatedProfitDollars,
     isProfitable,
     wasChecked: true,
   };
 }
 
-/** One eBay fetch + filter + peer-evaluate pass at a given offset. */
-async function fetchAndEvaluatePage(
-  query: string,
-  minPriceDollars: number | undefined,
-  maxPriceDollars: number | undefined,
-  minProfitDollars: number,
-  pageOffset: number
-): Promise<{ results: ElectronicsResult[]; rawCount: number }> {
-  const rawListings = await searchAnyListings(query, {
-    limit: FETCH_LIMIT,
-    minPriceDollars,
-    maxPriceDollars,
-    offset: pageOffset,
-  });
-  const listings = rawListings.filter((l) => !isBundle(l.title) && !isBrokenCondition(l.condition) && !isPartsListing(l.title));
-
-  const toEvaluate = listings.slice(0, MAX_LISTINGS_TO_EVALUATE);
-  const toSkip = listings.slice(MAX_LISTINGS_TO_EVALUATE);
-
-  const evaluated = await mapWithConcurrency(toEvaluate, LOOKUP_CONCURRENCY, (l) => evaluateListing(l, minProfitDollars));
-  const skipped: ElectronicsResult[] = toSkip.map((l) => ({
-    ...l,
-    priceDollars: l.priceCents / 100,
-    peerAveragePriceDollars: null,
-    peerCount: 0,
-    estimatedProfitDollars: null,
-    isProfitable: false,
-    wasChecked: false,
-  }));
-
-  return { results: [...evaluated, ...skipped], rawCount: rawListings.length };
-}
-
 /**
  * Electronics Search — requested directly: "locate iPhones, Apple
  * Watches and any electronics cheaper than their average value so I can
- * resell for profit." No category restriction (see searchAnyListings'
- * doc comment in lib/sources/ebay.ts — a free-text query targets the
- * right eBay category on its own, confirmed live), each listing checked
- * against its own peer-average asking price (see evaluateListing above)
- * rather than one shared reference, for the same reason manual card
- * search gives every listing its own PriceCharting match: a broad query
- * ("iPhone", say) spans many different actual products.
+ * resell for profit," later upgraded to compare against real sold
+ * prices instead of other active asking prices ("comparing against
+ * previous sold listings of the same exact product"). No eBay category
+ * restriction (see searchAnyListings' doc comment in
+ * lib/sources/ebay.ts), each listing checked against its own sold comps
+ * (see evaluateListing above) rather than one shared reference, for the
+ * same reason manual card search gives every listing its own
+ * PriceCharting match: a broad query ("iPhone", say) spans many
+ * different actual products.
  *
- * `minProfitDollars`/`minProfitableTarget` and the offset/multi-page
- * auto-search behavior mirror Auction Sniper's/Player Search's
- * searchEndingAuctions/searchPlayerCards exactly — see those files' doc
- * comments for the full reasoning, identical here: `minProfitDollars`
- * replaces the default $0 floor, `minProfitableTarget` keeps fetching
- * further eBay pages (up to MAX_PAGES_PER_SEARCH) until that many
- * profitable listings are found or eBay's results run out, and the
- * returned `pagesSearched`/`reachedTarget` let the caller report
- * honestly when a niche search genuinely doesn't have that many.
+ * `offset`, when given, shifts the eBay fetch forward — same "search
+ * again for new results" mechanism as Auction Sniper/Player Search (see
+ * those files), a single page per call, user-initiated each time rather
+ * than an automatic loop (see MAX_LISTINGS_TO_EVALUATE's comment above
+ * for why this version doesn't auto-page toward a profit-count target
+ * the way the eBay-only features do).
  */
 export async function searchElectronics(
   query: string,
@@ -237,30 +229,34 @@ export async function searchElectronics(
     sortBy = "profit",
     offset = 0,
     minProfitDollars = DEFAULT_MIN_ELECTRONICS_PROFIT_DOLLARS,
-    minProfitableTarget,
   } = options;
 
-  const allResults: ElectronicsResult[] = [];
-  let pagesSearched = 0;
-  let currentOffset = offset;
+  const rawListings = await searchAnyListings(query, {
+    limit: FETCH_LIMIT,
+    minPriceDollars,
+    maxPriceDollars,
+    offset,
+  });
+  const listings = rawListings.filter((l) => !isBundle(l.title) && !isBrokenCondition(l.condition) && !isPartsListing(l.title));
 
-  do {
-    const page = await fetchAndEvaluatePage(query, minPriceDollars, maxPriceDollars, minProfitDollars, currentOffset);
-    pagesSearched++;
-    allResults.push(...page.results);
+  const toEvaluate = listings.slice(0, MAX_LISTINGS_TO_EVALUATE);
+  const toSkip = listings.slice(MAX_LISTINGS_TO_EVALUATE);
 
-    const profitableSoFar = allResults.filter((l) => l.isProfitable).length;
-    const targetReached = !minProfitableTarget || profitableSoFar >= minProfitableTarget;
-    const exhausted = page.rawCount < FETCH_LIMIT;
+  const evaluated = await mapWithConcurrency(toEvaluate, LOOKUP_CONCURRENCY, (l) => evaluateListing(l, minProfitDollars));
+  const skipped: ElectronicsResult[] = toSkip.map((l) => ({
+    ...l,
+    priceDollars: l.priceCents / 100,
+    averageSoldPriceDollars: null,
+    compCount: 0,
+    mostRecentSaleDate: null,
+    soldSearchUrl: buildSoldSearchUrl(l.title),
+    estimatedProfitDollars: null,
+    isProfitable: false,
+    wasChecked: false,
+  }));
 
-    if (targetReached || exhausted || pagesSearched >= MAX_PAGES_PER_SEARCH) break;
-    currentOffset += FETCH_LIMIT;
-  } while (true);
-
-  const profitableTotal = allResults.filter((l) => l.isProfitable).length;
-  const reachedTarget = !minProfitableTarget || profitableTotal >= minProfitableTarget;
-
-  const listings =
+  const allResults = [...evaluated, ...skipped];
+  const sorted =
     sortBy === "price"
       ? [...allResults].sort((a, b) => a.priceDollars - b.priceDollars)
       : [...allResults].sort((a, b) => {
@@ -272,5 +268,5 @@ export async function searchElectronics(
           return a.priceDollars - b.priceDollars;
         });
 
-  return { listings, pagesSearched, reachedTarget };
+  return { listings: sorted };
 }

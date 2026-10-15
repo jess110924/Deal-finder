@@ -290,10 +290,18 @@ export type FavoriteCard = {
   reference?: ReferenceInfo;
   // Electronics Search-only: there's no PriceCharting-style single
   // product to link to (see `reference` above, which is PriceCharting-
-  // shaped), just a peer-asking-price average — kept as its own plain
-  // number instead of forcing it into `reference`'s shape.
-  peerAveragePriceDollars?: number;
-  peerCount?: number;
+  // shaped) — this is a real sold-price average (SOLD_COMPS_API_KEY),
+  // kept as its own plain number/date instead of forcing it into
+  // `reference`'s shape. Named `averageSoldPriceDollars` (not
+  // `peerAveragePriceDollars`, an earlier name from when Electronics
+  // Search compared against other active asking prices instead) —
+  // favorites saved under the old name just won't show this line
+  // anymore, same as any other optional snapshot field from before it
+  // existed.
+  averageSoldPriceDollars?: number;
+  compCount?: number;
+  mostRecentSaleDate?: string;
+  soldSearchUrl?: string;
 };
 
 export async function getFavorites(): Promise<FavoriteCard[]> {

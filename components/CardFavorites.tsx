@@ -119,12 +119,26 @@ export default function CardFavorites() {
                   vs ${fav.reference.ungradedPriceDollars.toFixed(2)} for &quot;{fav.reference.productName}&quot;
                 </a>
               )}
-              {fav.peerAveragePriceDollars != null && (
-                <div className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
-                  vs ${fav.peerAveragePriceDollars.toFixed(2)} average asking price
-                  {fav.peerCount != null && ` (${fav.peerCount} peers)`} when starred
-                </div>
-              )}
+              {fav.averageSoldPriceDollars != null &&
+                (fav.soldSearchUrl ? (
+                  <a
+                    href={fav.soldSearchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm block mt-1"
+                    style={{ color: "var(--series-1)", textDecoration: "underline" }}
+                  >
+                    vs ${fav.averageSoldPriceDollars.toFixed(2)} average sold price
+                    {fav.compCount != null && ` (${fav.compCount} sales`}
+                    {fav.mostRecentSaleDate && `, most recent ${fav.mostRecentSaleDate}`}
+                    {fav.compCount != null && ")"} when starred
+                  </a>
+                ) : (
+                  <div className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
+                    vs ${fav.averageSoldPriceDollars.toFixed(2)} average sold price
+                    {fav.compCount != null && ` (${fav.compCount} sales)`} when starred
+                  </div>
+                ))}
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                 <span className="font-semibold text-lg tabular-nums" style={{ color: "var(--text-primary)" }}>
                   ${fav.priceDollars.toFixed(2)}

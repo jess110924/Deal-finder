@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { searchElectronics } from "@/lib/electronicsSearch";
 
-// Paging forward to satisfy `minProfitable` (see lib/electronicsSearch.ts's
-// MAX_PAGES_PER_SEARCH) can mean several eBay fetches plus their own
-// batches of peer-search lookups in one request — same backstop reason
-// as check-watchlist/discover/auctions/player-search (see their route
-// files).
+// No multi-page auto-search anymore (see lib/electronicsSearch.ts), but
+// up to MAX_LISTINGS_TO_EVALUATE sequential batches of a third-party
+// scraper API (SOLD_COMPS_API_KEY) whose real latency hasn't been
+// measured here — kept as a safety margin against Vercel's much shorter
+// default function timeout, same reason the other multi-lookup routes
+// set this.
 export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
@@ -23,8 +24,6 @@ export async function GET(request: NextRequest) {
   const offset = offsetParam ? Number(offsetParam) : 0;
   const minProfitParam = request.nextUrl.searchParams.get("minProfit");
   const minProfitDollars = minProfitParam ? Number(minProfitParam) : undefined;
-  const minProfitableParam = request.nextUrl.searchParams.get("minProfitable");
-  const minProfitableTarget = minProfitableParam ? Number(minProfitableParam) : undefined;
 
   try {
     const result = await searchElectronics(query, {
@@ -35,10 +34,6 @@ export async function GET(request: NextRequest) {
       minProfitDollars:
         minProfitDollars != null && Number.isFinite(minProfitDollars) && minProfitDollars >= 0
           ? minProfitDollars
-          : undefined,
-      minProfitableTarget:
-        minProfitableTarget != null && Number.isFinite(minProfitableTarget) && minProfitableTarget > 0
-          ? Math.floor(minProfitableTarget)
           : undefined,
     });
     return NextResponse.json(result);
