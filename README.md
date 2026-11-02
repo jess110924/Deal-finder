@@ -1275,6 +1275,65 @@ soon and still underpriced" case sniping is built to catch, alongside
 several correctly-excluded results (bids already near or above the
 sold average, or too few comps to trust).
 
+## /amazon — Amazon Deals
+
+Requested directly: "a separate Amazon tab that I can link my Keepa API
+to, to find deals on Amazon that use a coupon or promo code or price
+errors." A dedicated page/nav tab (`app/amazon/page.tsx`,
+`components/AmazonDeals.tsx`, `lib/amazonDeals.ts`,
+`app/api/amazon/deals/route.ts`) rather than just a filter on the main
+feed's existing Keepa source — "price errors" and "has a coupon" are
+specific, narrower things than the main feed's general discount scan,
+and (see below) coupon-checking needs its own separate, more expensive
+API call that the main feed's lightweight integration was never built
+to make.
+
+**"Price errors" is an approximation, not a real Keepa signal** —
+checked live and confirmed Keepa has no "this is a pricing mistake"
+flag anywhere in its API. This page's "price error" filter is just a
+much higher discount-percentage floor (default 70%, adjustable) than
+the main feed's Keepa source uses (40%), stacked on the same
+`salesRankDrops90 > 0` legitimacy check `fetchDeals` already applies
+(see "Filtering out fake-looking deals" above) — an extreme discount
+that's still backed by real recent sales, not a guess at what "looks
+like" an error. Reuses `fetchDeals` directly rather than duplicating
+it.
+
+**Coupon detection needed real live investigation, and changed the
+plan mid-build.** Checked live before writing any code: Keepa's
+`/deal` endpoint (the one the discount browse above and the main feed
+both use) has no coupon field anywhere on its response — inspected the
+full raw shape of real deal objects to confirm. Coupon data only
+exists on Keepa's per-product `/product` endpoint's `coupon` field,
+confirmed live with real examples (e.g. `coupon: [889, 0]` on an actual
+product with an active coupon, found in roughly 1 of 25 products
+checked) — but that's a meaningfully more expensive call per item than
+the deal browse itself, and testing this live (batch-checking ~250 real
+ASINs to find working examples) burned through the test account's
+remaining Keepa tokens for the period, hitting their rate limit
+mid-investigation. `checkCoupons` in `lib/sources/keepa.ts` deliberately
+returns only a boolean per ASIN, not a parsed dollar amount — the exact
+meaning of the two numbers in the `coupon` array wasn't fully pinned
+down before hitting that rate limit, and showing a confidently-wrong
+dollar figure would be worse than not showing one; the Amazon link
+itself shows the real terms. `stats`/`offers`/`history` are deliberately
+left out of the `/product` request — each costs more tokens per ASIN
+and none of it is needed just to check whether `coupon` is set.
+
+Given that cost, coupon-checking is **opt-in and capped** —
+`MAX_COUPON_CHECKS` (12) in `lib/amazonDeals.ts`, same cost-conscious
+pattern as Electronics Search's sold-comps caps elsewhere in this
+project: off by default, so a plain browse of this page never spends
+the extra per-product tokens unless the "Check for coupons" box is
+checked, and even then only the top 12 results from that search get
+checked, not the whole batch.
+
+Verified live (the parts that didn't require burning more tokens — see
+above): the route correctly surfaces a real Keepa 429 (the test
+account's token budget, still recovering from the investigation above)
+as a clean, readable error instead of crashing — a realistic scenario
+to have actually hit during development, not a contrived test.
+
 ## Using it efficiently
 
 - **Source pills** (top) toggle which sources are shown — click to turn a
@@ -1336,7 +1395,9 @@ site is wide open without it.
 - `lib/aggregate.ts` — fetches all sources in parallel, isolates failures
 - `lib/sources/rss.ts` — RSS/Atom fetcher (Slickdeals, Reddit, DansDeals)
 - `lib/sources/cheapshark.ts`, `epic.ts` — free-game APIs
-- `lib/sources/keepa.ts` — Amazon price-drop search (needs your API key)
+- `lib/sources/keepa.ts` — Amazon price-drop search + per-product coupon check (needs your API key)
+- `app/amazon/page.tsx`, `components/AmazonDeals.tsx`, `lib/amazonDeals.ts` — Amazon Deals: extreme-discount "price errors" + opt-in coupon checking
+- `app/api/amazon/deals/route.ts` — its endpoint
 - `lib/auth.ts`, `proxy.ts`, `app/login/` — the password gate
 - `app/cards/page.tsx`, `components/CardSearch.tsx` — manual card search
 - `lib/cardComparison.ts` — eBay listings vs. PriceCharting reference comparison + profit filtering

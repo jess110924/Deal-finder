@@ -143,3 +143,58 @@ type KeepaDeal = {
   image?: number[];
   salesRankDrops90?: number;
 };
+
+/**
+ * Which of the given ASINs currently have an active Amazon coupon —
+ * requested directly ("find deals on Amazon that use a coupon or promo
+ * code"). Confirmed live this isn't available on the `/deal` endpoint
+ * `fetchDeals` above uses at all (checked the full raw shape of real
+ * deal objects — no coupon field anywhere on them); it only exists on
+ * the per-product `/product` endpoint's `coupon` field, confirmed live
+ * with real examples (e.g. `coupon: [889, 0]` on a real product with an
+ * active coupon) — present on roughly 1 in 25 products checked live, so
+ * not rare, but genuinely absent on most.
+ *
+ * Deliberately returns only a boolean per ASIN, not a parsed dollar
+ * amount — the exact meaning of the two numbers in the `coupon` array
+ * (cents off vs. a type flag) wasn't fully pinned down before hitting
+ * this account's rate limit during live testing, and showing a
+ * confidently-wrong dollar figure would be worse than not showing one;
+ * `hasCoupon` is enough to flag the item, and the Amazon link itself
+ * shows the real terms.
+ *
+ * Deliberately omits `stats`/`offers`/`history` from the request — each
+ * costs more Keepa tokens per ASIN on top of the base product lookup,
+ * and none of that data is needed just to check whether `coupon` is
+ * set. This is still a meaningfully more expensive call per ASIN than
+ * `fetchDeals`'s `/deal` browse, though — see MAX_COUPON_CHECKS in
+ * lib/amazonDeals.ts for the cap this is deliberately used under.
+ */
+export async function checkCoupons(asins: string[]): Promise<Set<string>> {
+  const apiKey = process.env.KEEPA_API_KEY;
+  if (!apiKey) {
+    throw new Error("KEEPA_API_KEY is not set.");
+  }
+  if (asins.length === 0) return new Set();
+
+  const url = new URL("https://api.keepa.com/product");
+  url.searchParams.set("key", apiKey);
+  url.searchParams.set("domain", String(US_DOMAIN_ID));
+  url.searchParams.set("asin", asins.join(","));
+
+  const res = await fetch(url.toString(), { next: { revalidate: 900 } }); // same cache window as fetchDeals
+  if (!res.ok) {
+    throw new Error(`Keepa product request failed: ${res.status} ${res.statusText}`);
+  }
+  const json = await res.json();
+  if (json?.error) {
+    throw new Error(`Keepa API error: ${JSON.stringify(json.error)}`);
+  }
+
+  const products: { asin?: string; coupon?: unknown }[] = Array.isArray(json?.products) ? json.products : [];
+  const withCoupon = new Set<string>();
+  for (const p of products) {
+    if (p.asin && p.coupon != null) withCoupon.add(p.asin);
+  }
+  return withCoupon;
+}
